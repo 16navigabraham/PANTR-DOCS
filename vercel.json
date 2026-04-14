@@ -1,4 +1,5 @@
 {
+  "framework": null,
   "buildCommand": "npx next build && npx pagefind --site out --output-path out/_pagefind",
   "outputDirectory": "out",
   "cleanUrls": true,
