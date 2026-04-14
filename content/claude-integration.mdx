@@ -1,0 +1,137 @@
+---
+title: Claude Integration
+---
+
+# Claude Integration
+
+The entire bot brain is Claude. Every user message goes through the Anthropic API with function calling (tools). No hardcoded command handlers.
+
+## How It Works
+
+```
+User: "buy $10 of BONK on solana"
+                |
+                v
+        System Prompt (parameterized with user state)
+        + Conversation History (last 20 messages from Redis)
+        + Tool Definitions (19 tools, filtered by premium status)
+                |
+                v
+          Claude API Call
+                |
+                v
+        Claude responds with:
+          tool_use: search_token(query="BONK", chain="SOLANA")
+                |
+                v
+        Tool Executor runs search_token → returns CA + price
+                |
+                v
+        Claude responds with:
+          tool_use: buy_token(tokenAddress="DezX...", amountUsd=10)
+                |
+                v
+        Tool Executor runs buy_token → swap executed
+                |
+                v
+        Claude generates final message:
+          "Bought 12,345 BONK for $10 on Solana. TX: ..."
+```
+
+## Claude Client
+
+`src/services/llm/claude-client.js`
+
+- Uses `@anthropic-ai/sdk`
+- **Agentic loop**: up to 5 tool rounds per message
+- Model selection:
+  - DMs: `claude-sonnet-4-20250514` (more capable)
+  - Groups: `claude-haiku-4-5-20251001` (cheaper, faster)
+- Max tokens: 1024 per response
+- Retries: 2 attempts with exponential backoff
+
+## System Prompt
+
+`src/services/llm/system-prompt.js` — parameterized per-user with:
+
+- Current date/time
+- Username
+- Premium status + expiry date
+- Wallet addresses (Solana + Base)
+- All user settings (buy amounts, slippage, risk score, daily limit, auto-sell config)
+
+Key behavioral rules:
+
+- Keep responses under 500 characters (Telegram, not email)
+- Default to SOLANA unless user specifies otherwise
+- Never reveal private keys
+- Confirm trades over $50 before executing
+- Confirm all withdrawals before executing
+- Warn on high-risk tokens
+- Use `search_token` when user mentions a token by name without a CA
+
+## Conversation Manager
+
+`src/services/llm/conversation-manager.js`
+
+- **Storage**: Upstash Redis
+- **Key format**: `conv:{userId}`
+- **TTL**: 24 hours (conversations reset daily)
+- **Window**: 20 messages max (sliding — oldest dropped)
+- **Graceful degradation**: if Redis is down, conversation starts fresh (no crash)
+
+## Rate Limiter
+
+`src/services/llm/rate-limiter.js`
+
+| Tier | Daily Limit | Burst Limit |
+|------|-------------|-------------|
+| Free | 30 messages | 5 per minute |
+| Premium | Unlimited | 15 per minute |
+
+- Uses Redis for daily counter (resets at midnight UTC)
+- Premium users skip the daily counter entirely
+- Burst limit still applies to premium (prevents API abuse)
+
+## Tool Definitions
+
+29 tools total. Filter logic in `getToolDefinitions(user)`:
+
+### Available to All
+
+`check_balance`, `check_portfolio`, `buy_token`, `sell_token`, `swap_tokens`, `get_trade_history`, `get_trading_stats`, `get_settings`, `update_settings`, `check_token_safety`, `get_token_price`, `get_trending_tokens`, `search_token`, `get_token_info`, `subscribe_premium`, `check_premium_status`, `pause_trading`, `resume_trading`, `get_deposit_address`, `withdraw`, `manage_alpha_callers`, `setup_wallets`, `link_email`, `get_linked_email`, `recover_account`
+
+### Premium Only
+
+`schedule_action`, `set_auto_sell`, `set_limit_order`, `set_dca`
+
+If a free user asks for a premium feature, Claude tells them it's premium-only and suggests `subscribe_premium`.
+
+## Tool Executor
+
+`src/services/llm/tool-executor.js` maps Claude's `tool_use` blocks to actual service calls. Services are injected at startup:
+
+- `orchestrator` — TradeOrchestrator (buy/sell/swap)
+- `walletService` — Privy wallet operations
+- `priceOracle` — Multi-source pricing
+- `checkTokenSafety` — Token risk analysis
+- `executePremiumPayment` — Premium subscription
+
+Each tool handler receives `(params, userId)` and returns a JSON result that Claude uses to craft its response.
+
+## Anti-Hallucination
+
+Trade tools (`buy_token`, `sell_token`, `swap_tokens`) return explicit `status: 'SUCCESS'` or `status: 'FAILED'` fields. On failure, the tool result includes:
+
+- `is_error: true` — tells Claude the tool call failed
+- `IMPORTANT` field — explicit instruction not to tell the user the trade succeeded
+
+This prevents Claude from misinterpreting a failed trade as successful, which could happen if error responses were ambiguous.
+
+## Response Format Templates
+
+The system prompt includes format templates for every action type (balance, portfolio, trade buy/sell, trade history, token safety, settings, alpha callers, failed trade). This ensures consistent Telegram output across all interactions — Claude follows the templates rather than improvising formatting.
+
+## Spam Token Filtering
+
+`check_portfolio` filters out tokens marked as `isSpam` in the trade record before returning positions to Claude. The system prompt also instructs Claude to never show spam tokens.

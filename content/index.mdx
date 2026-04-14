@@ -1,0 +1,33 @@
+---
+title: Introduction
+---
+
+# Pantr
+
+**Pantr** is a Telegram-first crypto trading assistant powered by Claude AI. Users chat with the bot in natural language to buy, sell, and track tokens on **Solana** and **Base**. No slash commands — everything goes through Claude's tool system.
+
+## What Makes Pantr Different
+
+- **Conversational AI-first** — every interaction is routed through Claude. Say "buy $10 of BONK" and it happens.
+- **Multi-chain** — native support for Solana (Jupiter) and Base (Odos, KyberSwap, Uniswap V3/V4).
+- **Alpha callers** — subscribe to users in TG groups whose contract addresses trigger automatic buys for you.
+- **Auto-sell** — set take-profit and stop-loss and let the bot do the work (premium).
+- **Privy-managed wallets** — no private key handling, no seed phrase exposure. Keys live in a TEE.
+
+## Quick Start
+
+1. Open Telegram, search for the bot, and send `/start`
+2. The bot creates Solana + Base wallets for you automatically
+3. Deposit SOL or ETH to your wallet
+4. Say "buy $10 of [contract address]" — Claude handles the rest
+
+## What's Inside These Docs
+
+- **Overview** — architecture, tech stack, and setup
+- **Core Systems** — Claude integration, trading engine, wallets, background jobs
+- **Features** — premium, alpha callers, auto-sell
+- **Security & Infra** — safety checks, database, CI/CD pipeline
+
+## Status
+
+Pantr is currently in pre-launch. The core trading engine is live and battle-tested. Launch is imminent.

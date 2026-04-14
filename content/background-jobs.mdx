@@ -1,0 +1,69 @@
+---
+title: Background Jobs
+---
+
+# Background Jobs
+
+All background jobs use `SafeInterval` (`src/utils/safe-interval.js`) — a crash-resilient, overlap-safe wrapper around `setInterval`. If a job throws, the error is logged but the interval continues.
+
+## Jobs
+
+| Job | Interval | Activity Gated | Purpose |
+|-----|----------|---------------|---------|
+| `pricePush` | 30s | No (checks connected users) | Push token prices to WebSocket clients |
+| `autoSell` | 5s | Yes | Check TP/SL triggers, execute sells |
+| `stuckTrades` | 5 min | Yes | Resolve trades stuck >10 min |
+| `premiumExpiration` | 1 hour | Yes | Downgrade expired premium users |
+| `pnlMonitor` | 90s | Yes | P&L milestone alerts for premium users |
+| `scheduledActions` | 1 min | Yes | Execute scheduled trades/actions |
+| `queueStats` | 1 min | No (in-memory only) | Log trade queue stats |
+
+Real-time deposit notifications don't live here — they're handled by the websocket-based [`DepositMonitor`](/deposit-notifications), not a polling interval.
+
+## Activity Gate
+
+`src/utils/activity-gate.js` — prevents background jobs from hitting the database when no one is using the app.
+
+### How It Works
+
+```
+User sends message → activityGate.touch()
+User connects WS  → activityGate.userConnected()
+User disconnects  → activityGate.userDisconnected()
+
+Background job:
+  if (!activityGate.isActive()) return;  // Skip DB query
+```
+
+### Idle Threshold
+
+10 minutes of no activity → gate closes → jobs skip DB queries → Neon Postgres can sleep.
+
+When a user interacts again → gate opens → jobs resume.
+
+### Why This Matters
+
+Neon serverless Postgres auto-suspends after inactivity. Without the gate, background jobs would:
+
+1. Wake up the DB every 5 seconds (auto-sell interval)
+2. Keep it alive 24/7 even with zero users
+3. Error out on cold starts (connection refused)
+
+The gate lets the DB sleep when nobody's around — cost and reliability win.
+
+## SafeInterval
+
+```javascript
+const job = new SafeInterval('job-name', async () => {
+  // Your job logic
+}, intervalMs);
+
+job.start();
+job.stop();
+```
+
+Features:
+
+- **Overlap prevention**: if a tick is still running, the next one waits
+- **Crash resilience**: errors are caught and logged, interval continues
+- **Named**: each job has a name for logging

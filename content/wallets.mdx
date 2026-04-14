@@ -1,0 +1,77 @@
+---
+title: Wallets
+---
+
+# Wallets
+
+Pantr uses **Privy server wallets** — keys are managed in Privy's TEE (Trusted Execution Environment). No private keys are stored locally or in the database.
+
+## Wallet Creation
+
+Wallets are created **lazily** — not on first message. This enables the account recovery flow (a returning user needs to recover their old wallets, not create new ones).
+
+### Flow
+
+1. User sends `/start` → auto-registered in DB (no wallets)
+2. Claude detects no wallets → asks: "Are you new, or recovering an existing account?"
+3. If **new**: Claude calls `setup_wallets` tool → two wallets created via Privy API
+4. If **recovering**: Claude calls `recover_account` → old wallets migrated to new account
+
+### What `setup_wallets` Does
+
+1. Creates Solana wallet (`chainType: 'solana'`) via Privy
+2. Creates Base/EVM wallet (`chainType: 'ethereum'`) via Privy
+3. Stores in DB: `address`, `privyWalletId`, `chain`, `walletType=EOA`
+4. Registers both wallets with the deposit monitor for real-time notifications
+
+## Signing
+
+All transaction signing happens via Privy's API.
+
+**Solana**
+```
+walletService.getSolanaSignTransaction(wallet)
+→ Returns a sign function
+→ Calls privyClient.walletApi.solana.signTransaction()
+→ Returns signed transaction
+```
+
+**EVM (Base)**
+```
+walletService.getEvmSigner(wallet)
+→ Returns an ethers.js-compatible signer
+→ Uses privyClient.walletApi.ethereum.signTransaction()
+→ Works with any ethers.js contract call
+```
+
+## Key Export
+
+`src/routes/wallet-export.js` — allows users to export their private key (for migration).
+
+Uses HPKE encryption (required by Privy):
+
+1. Generate ephemeral P-256 keypair
+2. Send public key to Privy API
+3. Privy returns encrypted private key
+4. Decrypt locally with HPKE (DHKEM_P256 + ChaCha20-Poly1305)
+
+## Retry Logic
+
+`src/utils/privy-retry.js` — wraps Privy API calls with exponential backoff for transient errors (network timeouts, 429 rate limits).
+
+## Database Model
+
+```prisma
+model Wallet {
+  id            String     @id @default(uuid())
+  userId        String
+  chain         Chain      // SOLANA, BASE, ETHEREUM
+  address       String
+  privyWalletId String?
+  walletType    WalletType // EOA, SMART_WALLET, CUSTODIAL
+  isActive      Boolean    @default(true)
+  @@unique([userId, chain])
+}
+```
+
+Each user has exactly one active wallet per chain.

@@ -1,0 +1,129 @@
+---
+title: Deposit Notifications
+---
+
+# Deposit Notifications
+
+Real-time alerts when a user receives SOL, ETH, or USDC into their Pantr wallet. Powered by websocket subscriptions rather than polling, so cost scales with **chains** — not users.
+
+Service: `src/services/deposit-monitor.js`
+
+## Why Websockets
+
+Polling every wallet every N seconds costs `O(users × chains)` RPC calls. At 1000 users across 2 chains with a 30s poll that's 2000 calls/30s — wasteful and slow.
+
+Websocket subscriptions are `O(chains)`: one persistent connection per chain pushes events as they happen.
+
+## Coverage
+
+| Chain | Token | Mechanism |
+|-------|-------|-----------|
+| Solana | SOL (native) | `onAccountChange` per wallet → balance delta |
+| Base | ETH (native) | WS `block` event → scan mined txs for `tx.to ∈ tracked addresses` |
+| Base | USDC | Single `Transfer` log subscription → filter `topics[2]` client-side |
+
+### Minimum thresholds
+
+Tiny dust transfers are ignored to avoid notification spam:
+
+- SOL: `0.0001`
+- ETH: `0.00001`
+- USDC: `0.01`
+
+## Architecture
+
+```
+┌───────────────────────┐    ┌───────────────────────┐
+│  Solana RPC (WSS)     │    │  Base WSS (Alchemy)   │
+│  onAccountChange      │    │  Transfer logs +      │
+│  per wallet           │    │  block subscription   │
+└──────────┬────────────┘    └──────────┬────────────┘
+           │                            │
+           └─────────────┬──────────────┘
+                         ▼
+            ┌────────────────────────┐
+            │    DepositMonitor      │
+            │  solWallets: Map       │  (base58, case-preserved)
+            │  evmWallets: Map       │  (lowercased 0x)
+            └────────────┬───────────┘
+                         ▼
+            ┌────────────────────────┐
+            │ notifications          │
+            │ .sendDepositReceived() │
+            └────────────┬───────────┘
+                         ▼
+              TG DM + WS emit
+```
+
+## Flow
+
+1. **On startup** — `DepositMonitor.start()` loads every active wallet from the DB into two in-memory maps (split by chain because Solana base58 is case-sensitive, EVM is not).
+2. **Solana** — calls `onAccountChange(pubkey)` for each SOL wallet. The handler tracks the previous lamport balance and fires `handleDeposit` on any positive delta ≥ threshold.
+3. **Base USDC** — one log filter on the USDC contract for the `Transfer(address,address,uint256)` topic. The recipient (`topics[2]`) is checked against `evmWallets` — match = fire.
+4. **Base ETH** — subscribes to `block` events. For each mined block, fetches full transactions and scans `tx.to` against `evmWallets`.
+5. **On new wallet** — `wallet-service.createWallet()` calls `depositMonitor.addWallet(address, userId, chain)` so new users get covered without a restart.
+
+## Notification
+
+`notifications.sendDepositReceived(userId, { chain, token, amount, amountUsd, txHash })` formats a Telegram DM:
+
+```
+💰 Deposit Received!
+
+🟣 0.25 SOL (~$21.06)
+Chain: SOLANA
+
+[View Transaction]
+```
+
+It also emits a `deposit:received` WebSocket event for the dashboard.
+
+## WS Crash Protection
+
+The Base WebSocket provider uses a two-step connection to prevent server crashes:
+
+1. Create a raw `WebSocket` with an error handler attached
+2. If handshake fails (e.g. 429 rate limit), resolve `null` instead of throwing
+3. Only pass the connected WS to `ethers.WebSocketProvider` after successful handshake
+
+Without this, `ethers.WebSocketProvider` throws an uncaught async error on handshake failure, crashing the entire Node process. On Render, this triggers an immediate restart → another 429 → crash loop.
+
+## Reconnect
+
+Base WS reconnects with exponential backoff (1s → 30s max, capped at 10 attempts) on `close` or handshake failure. After 10 failed attempts, Base monitoring is disabled until the next server restart. Subscriptions are rebuilt from the in-memory map, which is the source of truth.
+
+Solana reconnects are handled by `@solana/web3.js` Connection internally.
+
+## Activity Gate
+
+Not needed — websockets are idle-friendly (no polling cost). The monitor stays connected 24/7. Block scans are skipped when `evmWallets.size === 0`.
+
+## Config
+
+```env
+# Required for Base monitoring (native ETH + USDC)
+BASE_WS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
+
+# Solana uses the existing RPC URL (must be WS-capable)
+SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<key>
+```
+
+Without `BASE_WS_URL`, Base monitoring is skipped with a warning — Solana still works.
+
+## Trade Suppression
+
+When a user executes a trade, the resulting balance change should not trigger a deposit notification. Two mechanisms handle this:
+
+### EVM (Base) — TX Hash Filtering
+
+`registerTradeTx(txHash)` adds the trade's transaction hash to a `recentTradeTxHashes` Set with a 60-second TTL. When `handleDeposit` fires, it checks if the txHash matches a recent trade and skips the notification.
+
+### Solana — User-Level Suppression
+
+Solana's `onAccountChange` doesn't provide a transaction hash, so txHash filtering can't work. Instead, `suppressUser(userId)` adds the user to a `suppressedUsers` Set with a 60-second TTL. Any deposit detected for that user during the window is silently ignored.
+
+Both mechanisms are triggered from the trade orchestrator's `onTxSent` hook, which passes `{ txHash, userId }`.
+
+## Not Covered (Yet)
+
+- **Solana USDC** — arrives at the wallet's Associated Token Account (ATA), a derived address. Needs a separate `onAccountChange` subscription on each user's USDC ATA. Planned as a follow-up.

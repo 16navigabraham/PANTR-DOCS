@@ -1,0 +1,144 @@
+---
+title: Trading Engine
+---
+
+# Trading Engine
+
+The `TradeOrchestrator` (`src/services/trade-orchestrator.js`) is the central trading engine. All buys, sells, and swaps flow through it.
+
+## Buy Flow
+
+```
+User: "buy $10 of DezXAZ..."
+         |
+         v
+   Tool Executor → orchestrator.buyToken()
+         |
+         v
+   1. Validate user + wallet
+   2. Safety check (GoPlus/RugCheck)
+   3. Create SUBMITTED trade record in DB
+   4. Route to chain-specific swap:
+      - Solana → Jupiter V4 API
+      - Base → Odos → KyberSwap → Uniswap V3 → Uniswap V4
+   5. Deduct platform fee → transfer to treasury
+   6. On success: mark CONFIRMED, store txHash + amounts
+   7. On failure: mark FAILED, store error
+   8. Notify user via Telegram
+```
+
+## Validations
+
+- User exists and is active
+- Wallet exists for the target chain
+- Amount >= $2 minimum
+- Token passes safety check (risk score ≤ user's `maxRiskScore`)
+- Honeypot tokens blocked entirely
+- Known stablecoins (USDC) skip safety checks
+- `minLiquidityUsd` user setting passed through to safety checks
+
+## USD to Native Conversion
+
+When user says "buy $10", the amount is in USD:
+
+- **Solana**: fetch SOL price → `$10 / solPrice = amountInSol`
+- **Base**: swap service handles USD→ETH conversion internally
+
+## Sell Flow
+
+```
+User: "sell 50% of my BONK"
+         |
+         v
+   1. Look up user's on-chain token balance
+   2. Calculate: balance * 50 / 100
+   3. Create SUBMITTED sell trade in DB
+   4. Execute swap: token → SOL/ETH
+   5. Calculate P&L (sell price vs cost basis)
+   6. Mark CONFIRMED, notify user
+```
+
+## Swap Routing
+
+### Solana
+
+Single router: **Jupiter V4 API**
+
+```
+getQuote() → buildSwapTransaction() → sign via Privy → sendTransaction() → confirm
+```
+
+Special case: **Pump.fun** tokens (bonding curve) use `pumpfun-swap.js` directly.
+
+### Base (EVM)
+
+Cascading fallback with multiple DEX aggregators:
+
+```
+1. Odos         → if fail/no route →
+2. KyberSwap    → if fail/no route →
+3. Uniswap V3   → if fail/no route →
+4. Uniswap V4
+```
+
+Each aggregator:
+
+1. Get quote (best price + route)
+2. Build transaction
+3. Sign via Privy EVM signer
+4. Submit and wait for receipt
+
+## Fees
+
+| Tier | Fee |
+|------|-----|
+| Free | 1% (100 bps) |
+| Premium | 0.5% (50 bps) |
+
+Fee is deducted from the input amount before the swap:
+
+- Free user buys $10 → $0.10 fee → $9.90 swapped
+- Fee transferred to treasury wallet after swap confirms
+
+Fee collection: `src/services/fee-collector.js`
+
+## Stuck Trade Resolution
+
+Background job runs every 5 minutes:
+
+1. Find trades in PENDING/SUBMITTED status for >10 minutes
+2. Query the blockchain for transaction status
+3. If confirmed on-chain → mark CONFIRMED
+4. If failed/dropped → mark FAILED
+5. If still pending → leave for next check
+
+## Trade Queue
+
+`src/lib/trade-queue.js` — limits concurrent trade execution to 3.
+
+Prevents:
+- Nonce conflicts on EVM
+- RPC rate limiting
+- Database connection exhaustion
+
+Trades queue up and execute in order. Stats logged every 60 seconds.
+
+## Swap Services
+
+| Service | Chains | DEXes |
+|---------|--------|-------|
+| `solana-swap.js` | Solana | Jupiter V4 |
+| `pumpfun-swap.js` | Solana | Pump.fun bonding curve |
+| `evm-swap.js` | Base | Odos, KyberSwap, Uniswap V3, Uniswap V4 |
+
+## Portfolio
+
+`check_portfolio` aggregates the user's open positions with current prices and P&L.
+
+### Spam Token Filtering
+
+Airdropped spam tokens (e.g. PreSPAX) are common on Base and Solana. The portfolio tool filters these out:
+
+- Tokens with `isSpam: true` in the trade record are excluded from results
+- The `spamFiltered` count is returned so Claude can mention it if relevant
+- The system prompt instructs Claude to never display spam tokens

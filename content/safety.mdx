@@ -1,0 +1,123 @@
+---
+title: Safety & Security
+---
+
+# Safety & Security
+
+## Token Safety Checks
+
+Before any trade, tokens are checked for risks. Service: `src/services/safety/token-safety.js`
+
+### Solana Tokens
+
+- **Provider**: RugCheck API (`api.rugcheck.xyz`)
+- **Checks**: honeypot, liquidity, holder concentration, mint authority, freeze authority
+
+### EVM Tokens (Base)
+
+- **Provider**: GoPlus API (`api.gopluslabs.io`)
+- **Checks**: honeypot, buy/sell tax, ownership renounced, holder concentration
+- **Fallback**: DEXScreener for liquidity data
+
+### Risk Scoring
+
+Weighted calculation (0-100):
+
+| Factor | Weight |
+|--------|--------|
+| Honeypot detection | 30% |
+| Liquidity depth | 25% |
+| Ownership status | 15% |
+| Holder concentration | 15% |
+| Buy/sell tax | 10% |
+| Token age | 5% |
+
+Risk levels:
+
+- **LOW** (0-30): Safe to trade
+- **MEDIUM** (31-60): Proceed with caution
+- **HIGH** (61-80): Warning shown to user
+- **CRITICAL** (81-100): Trade blocked
+
+### User Controls
+
+- `maxRiskScore` setting (default 60) — tokens above this trigger a warning
+- `minLiquidityUsd` setting (default $5,000) — minimum USD liquidity a token must have to pass the liquidity check. Configurable per user via `update_settings`
+- Honeypot tokens are blocked regardless of user settings
+- Known stablecoins (USDC) skip safety checks entirely
+
+### Token Cache
+
+Results cached in DB (`TokenCache` model) to avoid redundant API calls:
+
+- `(address, chain)` as composite key
+- `riskScore`, `safetyData` (JSON), `isHoneypot`
+- `lastCheckedAt` — TTL-based refresh
+
+## Scanner Shield
+
+`src/middleware/scanner-shield.js` — blocks automated vulnerability scanners.
+
+Detects probing requests for `.env`, `.git/config`, `wp-admin`, backup files, and common exploit paths.
+
+Behavior:
+
+1. First probe: request blocked, IP logged
+2. After 10 probes in 1 minute: IP blocked for 5 minutes
+3. All probes logged for monitoring
+
+## Rate Limiting
+
+Express middleware (`src/middleware/rate-limiter.js`):
+
+| Endpoint | Free | Premium |
+|----------|------|---------|
+| API general | 30 req/min | 120 req/min |
+| Auth endpoints | 10 req/min per IP | 10 req/min per IP |
+| Write operations | 10 req/min | 30 req/min |
+| Heavy reads | 5 req/min | 20 req/min |
+| Trade endpoints | 5 req/min | 15 req/min |
+
+LLM rate limits (separate):
+
+| Tier | Daily | Burst |
+|------|-------|-------|
+| Free | 30/day | 5/min |
+| Premium | Unlimited | 15/min |
+
+## Security Headers
+
+Via Helmet.js:
+
+- HSTS (HTTP Strict Transport Security)
+- CSP (Content Security Policy)
+- X-Content-Type-Options: nosniff
+- X-Frame-Options: DENY
+- Referrer-Policy: strict-origin-when-cross-origin
+
+## CORS
+
+Restricted to configured `FRONTEND_URL` origin only.
+
+## HTTPS
+
+`src/middleware/https-enforcer.js` redirects HTTP to HTTPS in production.
+
+## API Origin Enforcement
+
+Middleware on `/api/*` routes blocks requests without an `Origin` header — prevents direct API access from curl, Postman, or scripts outside the frontend.
+
+Exemptions:
+- Admin routes (`/api/admin/*`)
+- Wallet export view (`/api/wallets/*/export/view`)
+- Requests with a valid `X-API-Key` header
+
+This is important because Pantr accounts are created via Telegram (no traditional auth flow), so API endpoints need protection against unauthorized direct access.
+
+## Auth
+
+Dual auth system:
+
+- **JWT** — for web/API access
+- **Privy** — for wallet-linked authentication
+- **Telegram** — bot uses `telegramId` directly (no auth needed in TG context)

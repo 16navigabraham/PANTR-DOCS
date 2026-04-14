@@ -1,0 +1,150 @@
+---
+title: Database
+---
+
+# Database
+
+Neon serverless Postgres via Prisma ORM.
+
+## Connection
+
+- **Runtime**: Pooler URL (`-pooler` in hostname) with `pgbouncer=true&connection_limit=10`
+- **Migrations**: Direct URL (bypasses pgbouncer)
+- Auto-configured in `src/lib/prisma.js`
+
+## Models
+
+### User
+
+Core user record. Created automatically on first Telegram message.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | UUID | Primary key |
+| `email` | String? | Optional (web login) |
+| `telegramId` | String? | Unique TG user ID |
+| `telegramUsername` | String? | Display name |
+| `privyUserId` | String? | Privy auth ID |
+| `isPremium` | Boolean | Subscription status |
+| `premiumUntil` | DateTime? | Expiry date |
+| `isActive` | Boolean | Can trade |
+| `isPaused` | Boolean | Paused by user |
+
+### Wallet
+
+One per chain per user. No local key storage.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | String | FK → User |
+| `chain` | Enum | SOLANA, BASE, ETHEREUM |
+| `address` | String | Public address |
+| `privyWalletId` | String? | Privy wallet ID |
+| `walletType` | Enum | EOA, SMART_WALLET, CUSTODIAL |
+| `isActive` | Boolean | Default true |
+
+Unique: `(userId, chain)`
+
+### UserSettings
+
+Trading configuration. One per user.
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `solBuyAmount` | Float? | — | SOL buy amount in SOL |
+| `solUsdBuyAmount` | Float? | — | SOL buy amount in USD |
+| `baseBuyAmount` | Float? | — | Base buy amount in ETH |
+| `baseUsdcBuyAmount` | Float? | — | Base buy amount in USD |
+| `baseTradingMode` | String | USDC | USDC or ETH |
+| `maxSlippageBps` | Int | 1500 | Max slippage (bps) |
+| `maxRiskScore` | Int | 60 | Max token risk (0-100) |
+| `dailyLimitUsd` | Float | 100 | Daily spending cap |
+| `autoSellEnabled` | Boolean | false | TP/SL active |
+| `takeProfitPct` | Float? | — | Take profit % (min 25) |
+| `stopLossPct` | Float? | — | Stop loss % (min 10) |
+
+### Trade
+
+Every buy/sell/swap creates a trade record.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | String | FK → User |
+| `walletId` | String | FK → Wallet |
+| `chain` | Enum | SOLANA, BASE |
+| `tokenAddress` | String | Contract address |
+| `tokenSymbol` | String? | e.g., BONK |
+| `action` | Enum | BUY, SELL |
+| `amountIn` | Float | Input amount (native) |
+| `amountInUsd` | Float? | Input in USD |
+| `amountOut` | Float? | Output amount |
+| `amountOutUsd` | Float? | Output in USD |
+| `txHash` | String | Transaction hash |
+| `txStatus` | Enum | PENDING, SUBMITTED, CONFIRMED, FAILED, REJECTED |
+| `platformFee` | Float? | Fee charged |
+| `riskScore` | Int? | Token risk at time of trade |
+
+Indexes: `(userId, createdAt)`, `(txStatus)`, `(tokenAddress, chain)`
+
+### AlphaGroup
+
+Subscriber → group → caller mapping.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | String | Subscriber |
+| `groupId` | String | TG group ID |
+| `callerUsername` | String | Alpha caller (without @) |
+| `isActive` | Boolean | Can be paused |
+| `tradesExecuted` | Int | Counter |
+
+### PremiumPayment
+
+Payment records for premium subscriptions.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | String | FK → User |
+| `paymentChain` | String | SOLANA or BASE |
+| `amountPaid` | Float | Native amount |
+| `amountUsd` | Float | USD equivalent |
+| `txHash` | String | Payment transaction |
+| `status` | Enum | PENDING, CONFIRMED, FAILED |
+| `startDate` | DateTime | Subscription start |
+| `endDate` | DateTime | Subscription end |
+
+### ScheduledAction
+
+Future actions queued by premium users.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | String | FK → User |
+| `action` | String | Tool name (e.g., buy_token) |
+| `params` | JSON | Tool parameters |
+| `executeAt` | DateTime | When to execute |
+| `status` | Enum | PENDING, RUNNING, COMPLETED, FAILED |
+| `result` | JSON? | Execution result |
+
+### TokenCache
+
+Cached token safety data.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `address` | String | Contract address |
+| `chain` | Enum | Composite PK with address |
+| `riskScore` | Int? | Safety score |
+| `safetyData` | JSON? | Full check results |
+| `isHoneypot` | Boolean? | Honeypot flag |
+| `lastCheckedAt` | DateTime | For TTL refresh |
+
+## Useful Commands
+
+```bash
+npx prisma migrate dev    # Create + apply migration
+npx prisma db push        # Push schema without migration
+npx prisma generate       # Regenerate client
+npx prisma studio         # Visual DB browser
+npx prisma migrate reset  # Reset DB (destructive)
+```

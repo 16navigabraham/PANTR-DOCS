@@ -1,0 +1,62 @@
+---
+title: Auto-Sell
+---
+
+# Auto-Sell
+
+Premium-only feature. Automatically sells positions when take-profit or stop-loss triggers hit.
+
+## Setup
+
+User tells Claude: *"set auto-sell with 100% take profit and 50% stop loss"*
+
+Claude calls `set_auto_sell(enabled=true, takeProfitPct=100, stopLossPct=50)`
+
+Settings stored in `UserSettings`:
+
+- `autoSellEnabled`: boolean
+- `takeProfitPct`: percentage (min 25%)
+- `stopLossPct`: percentage (min 10%)
+
+### Minimums
+
+- **Take Profit: 25% minimum** — lower values get triggered by normal volatility
+- **Stop Loss: 10% minimum** — tighter stops get hit by slippage on illiquid tokens
+
+## How It Works
+
+Background job runs every 5 seconds (`src/services/auto-sell.js`):
+
+```
+1. Fetch all premium users with autoSellEnabled=true
+2. For each user:
+   a. Get all confirmed BUY trades (open positions)
+   b. For each position:
+      - Get current on-chain token balance
+      - Get current price (DEXScreener/Jupiter)
+      - Calculate cost basis from trade records
+      - Calculate unrealized P&L %
+      - If P&L >= takeProfitPct → SELL (take profit)
+      - If P&L <= -stopLossPct → SELL (stop loss)
+   c. Execute sell via orchestrator
+   d. Notify user in Telegram DM
+```
+
+## Example
+
+Settings: TP 100%, SL 50%
+
+- Bought 1000 DEGEN at $0.01 (cost: $10)
+- Current price: $0.02 → value: $20 → P&L: +100% → **TP triggered, sell**
+- Current price: $0.005 → value: $5 → P&L: -50% → **SL triggered, sell**
+
+## Constraints
+
+- Minimum position size: $0.50 (gas costs exceed value below this)
+- Stablecoins excluded (USDC, USDT — not speculative)
+- Only checks positions with confirmed BUY trades
+- Skips tokens with zero on-chain balance (already sold manually)
+
+## Activity Gate
+
+The auto-sell job respects the activity gate — if no users are active, it skips DB queries to let Neon sleep.

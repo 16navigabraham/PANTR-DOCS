@@ -1,0 +1,146 @@
+---
+title: Account Recovery
+---
+
+# Account Recovery
+
+Users can link an email address to their account and use it to recover access if they lose their Telegram account or switch devices.
+
+## Email Linking
+
+Service: `src/services/email.js` (Resend API)
+
+### Flow
+
+```
+User: "link my email"
+        |
+        v
+  Claude calls link_email({ email, step: "send_code" })
+        |
+        v
+  Tool Executor:
+    1. Validate email format
+    2. Check email not already linked to another account
+    3. Generate 6-digit code via generateCode()
+    4. Store code in DB (User.verificationCode + verificationCodeExpiry)
+    5. Send code via Resend API → user's inbox
+        |
+        v
+  User receives email, replies with code
+        |
+        v
+  Claude calls link_email({ email, code, step: "verify_code" })
+        |
+        v
+  Tool Executor:
+    1. Check code matches + not expired (10 min TTL)
+    2. Set User.email = email
+    3. Clear verificationCode fields
+        |
+        v
+  Claude: "Email linked successfully!"
+```
+
+### Email Template
+
+HTML email with a centered 6-digit code in monospace font. Branded as "Pantr Verification".
+
+Default sender: `Pantr <onboarding@resend.dev>` (configurable via `RESEND_FROM` env var). Custom domain requires verification on [resend.com](https://resend.com).
+
+### Config
+
+```env
+RESEND_API_KEY=re_xxxx          # Required for email service
+RESEND_FROM=Pantr <noreply@yourdomain.com>  # Optional, defaults to resend.dev
+```
+
+Without `RESEND_API_KEY`, the email service is disabled and link/recovery tools return an error.
+
+## Account Recovery
+
+When a user loses access to their Telegram and creates a new account, they can recover their old wallets, trades, and settings.
+
+### Flow
+
+```
+New TG account → /start → Claude detects no wallets
+        |
+        v
+  Claude asks: "Are you new, or do you have an existing account to recover?"
+        |
+        v
+  User: "recover my account"
+        |
+        v
+  Claude calls recover_account({ email, step: "send_code" })
+        |
+        v
+  1. Find the OLD user record by email
+  2. Send verification code to that email
+        |
+        v
+  User provides code
+        |
+        v
+  Claude calls recover_account({ email, code, step: "verify_code" })
+        |
+        v
+  1. Verify code against the OLD user record
+  2. Migrate all data to the CURRENT TG user:
+     - Wallets (update userId)
+     - Trades (update userId)
+     - Settings (copy over)
+     - Email (move to new account)
+     - Premium status (copy over)
+  3. Deactivate OLD account (isActive: false)
+        |
+        v
+  Claude: "Account recovered! Your wallets and history are here."
+```
+
+### What Gets Migrated
+
+| Data | Migration |
+|------|-----------|
+| Wallets | `userId` updated to new account |
+| Trades | `userId` updated to new account |
+| Settings | Copied to new user record |
+| Email | Moved to new account, cleared from old |
+| Premium | `isPremium`, `premiumUntil` copied |
+
+### What Happens to the Old Account
+
+- `isActive` set to `false`
+- Wallets transferred (no longer associated)
+- Email cleared
+- Account remains in DB for audit trail
+
+## Lazy Wallet Creation
+
+Wallets are **not** created automatically when a user first messages the bot. This is critical for the recovery flow — if wallets were auto-created, a recovering user would get new wallets before they could say "I want to recover."
+
+### Flow
+
+```
+User sends /start
+        |
+        v
+  message-handler: auto-register user in DB (no wallets)
+        |
+        v
+  Claude sees: Solana wallet = "Not set up", Base wallet = "Not set up"
+        |
+        v
+  Claude asks: "Are you new, or do you have an existing account to recover?"
+        |
+        v
+  If NEW:  Claude calls setup_wallets → creates Solana + Base wallets via Privy
+  If RECOVER: Claude calls recover_account → migrates old wallets
+```
+
+The `setup_wallets` tool creates both wallets and registers them with the deposit monitor in one call.
+
+### Tool: `get_linked_email`
+
+Returns the email linked to the current user's account. Used by Claude to show users their linked email or confirm it's set up.

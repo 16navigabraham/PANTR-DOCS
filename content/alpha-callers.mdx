@@ -1,0 +1,80 @@
+---
+title: Alpha Callers
+---
+
+# Alpha Callers
+
+Alpha callers are users in Telegram groups whose contract address (CA) messages trigger automatic buys for subscribers.
+
+## How It Works
+
+1. **Setup**: User adds bot to a TG group, then tags it: `@PantrAgent_bot add alpha @cryptoguru`
+2. **Storage**: `AlphaGroup` record in DB linking subscriber → group → caller
+3. **Detection**: Bot monitors group messages. When a tracked caller posts a CA:
+   - Parse CA from message (`ca-parser.js`)
+   - Look up all subscribers for that caller in that group
+   - Execute buy for each subscriber
+4. **Notification**: Subscriber gets a DM: "Auto-bought [token] from @cryptoguru's call"
+
+## Message Flow
+
+```
+@cryptoguru posts "DezXAZ8z7... 🚀" in group
+         |
+         v
+   alpha.js detects CA from tracked caller
+         |
+         v
+   For each subscriber:
+     1. Check daily limit (free: 5/day, premium: unlimited)
+     2. Dedup check (Redis key: alpha:seen:{groupId}:{msgId})
+     3. Run safety check on token
+     4. Execute buy via orchestrator
+     5. DM subscriber with result
+```
+
+## Managing Callers
+
+Via the `manage_alpha_callers` tool:
+
+| Action | Description |
+|--------|-------------|
+| `add` | Subscribe to a caller's CAs in a group |
+| `remove` | Unsubscribe from a caller |
+| `list` | Show all tracked callers |
+| `pause` | Temporarily stop a caller's auto-buys |
+| `resume` | Re-enable a paused caller |
+
+## Daily Limits
+
+| Tier | Alpha Auto-buys/Day |
+|------|---------------------|
+| Free | 5 |
+| Premium | Unlimited |
+
+Tracked via Redis key: `alpha:buys:{userId}` with 24h TTL.
+
+## Privacy
+
+When a user tags the bot in a group asking about balance, portfolio, or trading:
+
+- Bot detects privacy-sensitive request
+- Responds in group: "Check your DMs!"
+- Processes the request in the user's DM
+
+Public queries (token price, safety, trending) are answered directly in the group.
+
+## Database Model
+
+```prisma
+model AlphaGroup {
+  id              String  @id @default(uuid())
+  userId          String
+  groupId         String   // Telegram group ID
+  groupTitle      String?
+  callerUsername  String   // Without @
+  callerId        String?  // Telegram user ID
+  isActive        Boolean @default(true)
+  tradesExecuted  Int     @default(0)
+}
+```

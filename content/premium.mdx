@@ -1,0 +1,77 @@
+---
+title: Premium Model
+---
+
+# Premium Model
+
+$10/month, paid in SOL or Base ETH. Handled by `src/routes/premium.js`.
+
+## Free vs Premium
+
+| Feature | Free | Premium |
+|---------|------|---------|
+| Trade fee | 1% | 0.5% |
+| Messages/day | 30 | Unlimited |
+| Alpha auto-buys/day | 5 | Unlimited |
+| Auto-sell (TP/SL) | No | Yes |
+| Scheduled actions | No | Yes |
+| Limit orders | No | Yes (coming soon) |
+| DCA | No | Yes (coming soon) |
+
+## Payment Flow
+
+1. User: "subscribe to premium" (or Claude suggests it)
+2. Claude calls `subscribe_premium(chain='SOLANA'|'BASE')`
+3. Tool executor calls `executePremiumPayment(userId, chain)`
+
+### Solana Path
+
+- Fetch SOL price from price oracle
+- Calculate: `$10 / solPrice = amountSol`
+- Build SOL transfer to `TREASURY_WALLET_SOLANA`
+- Sign via Privy
+- Confirm transaction
+
+### Base ETH Path
+
+- Fetch ETH price from price oracle
+- Calculate: `$10 / ethPrice = amountEth`
+- Transfer via ethers.js signer to `TREASURY_WALLET_BASE`
+- Wait for 1 block confirmation
+
+### After Payment
+
+- Create `PremiumPayment` record (status: CONFIRMED)
+- Set `user.isPremium = true`
+- Set `user.premiumUntil = now + 30 days`
+- Clear any cached rate limit flags in Redis
+
+## Expiry
+
+Background job runs every hour (`premiumExpiration`):
+
+1. Find users where `premiumUntil < now` and `isPremium = true`
+2. Set `isPremium = false`
+3. Send TG notification: "Your premium has expired"
+
+## Premium Status Check
+
+`check_premium_status` tool returns:
+
+- `isPremium`: boolean
+- `premiumUntil`: date
+- `daysRemaining`: number
+
+## Pricing Endpoint
+
+`GET /api/premium/pricing` returns both payment options:
+
+```json
+{
+  "priceUsd": 10,
+  "payments": [
+    { "chain": "SOLANA", "currency": "SOL", "amount": 0.067, "price": 149.25 },
+    { "chain": "BASE", "currency": "ETH", "amount": 0.0039, "price": 2564.10 }
+  ]
+}
+```

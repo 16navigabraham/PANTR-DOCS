@@ -1,0 +1,91 @@
+---
+title: CI/CD Pipeline
+---
+
+# CI/CD Pipeline
+
+## Local Pre-commit Hook
+
+On every `git commit`, husky runs:
+
+```
+lint-staged → ESLint --fix on staged src/**/*.js files
+```
+
+If ESLint finds errors (not warnings), the commit is blocked.
+
+Config: `.husky/pre-commit`, `package.json` (lint-staged section)
+
+## GitHub Actions
+
+On every push (any branch) and PR to main:
+
+```
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│ secret-scan │  │   audit     │  │   install   │
+│ (gitleaks)  │  │ (npm audit) │  │ (npm ci)    │
+└──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+       │                │          ┌─────┴─────┐
+       │                │          │           │
+       │                │    ┌─────┴──┐  ┌─────┴──────┐
+       │                │    │  lint  │  │  schema-   │
+       │                │    │(eslint)│  │   check    │
+       │                │    └────┬───┘  └─────┬──────┘
+       └────────────────┴─────────┴────────────┘
+                        │
+                  ┌─────┴──────┐
+                  │   test     │
+                  │ (jest 454) │
+                  └─────┬──────┘
+                        │
+                  ┌─────┴──────┐
+                  │deploy-gate │
+                  │(main only) │
+                  └────────────┘
+```
+
+### Steps
+
+| Step | What | Fails If |
+|------|------|----------|
+| `secret-scan` | Gitleaks scans for leaked secrets | Keys/tokens found in code |
+| `audit` | `npm audit --omit=dev --audit-level=critical` | Critical vulnerability in deps |
+| `install` | `npm ci` + cache `node_modules` | Install fails |
+| `lint` | `npx eslint src/ --max-warnings 50` | Any error or > 50 warnings |
+| `schema-check` | `npx prisma validate` | Invalid schema syntax |
+| `test` | `npm test` (all 29 suites, 454 tests) | Any test fails |
+| `deploy-gate` | Green light for main | — |
+
+### Concurrency
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+Pushing again to the same branch cancels the previous run.
+
+## Branch Protection
+
+Set on `main` branch:
+
+- Require PR before merging (no direct push)
+- Required status checks: `test`, `lint`, `schema-check`
+- Require branch to be up to date before merging
+
+## Workflow
+
+```
+feature branch → commit (lint) → push (CI) → PR to main → checks pass → merge → deploy
+```
+
+## Config Files
+
+| File | Purpose |
+|------|---------|
+| `.github/workflows/ci.yml` | GitHub Actions pipeline |
+| `.husky/pre-commit` | Pre-commit hook |
+| `eslint.config.mjs` | ESLint flat config |
+| `.gitleaks.toml` | Gitleaks secret scanning config |
+| `package.json` | lint-staged config |

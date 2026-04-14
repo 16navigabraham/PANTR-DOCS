@@ -1,0 +1,61 @@
+---
+title: Tech Stack
+---
+
+# Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Bot framework | Grammy (Telegram) |
+| AI | Claude API (Anthropic) |
+| Server | Express + Socket.io |
+| Database | Neon Postgres (serverless) via Prisma |
+| Cache | Upstash Redis (serverless) |
+| Wallets | Privy server wallets (TEE) |
+| Solana DEX | Jupiter V4 |
+| Base DEXes | Odos, KyberSwap, Uniswap V3, Uniswap V4 |
+| Safety | GoPlus (EVM), RugCheck (Solana) |
+| Error tracking | Sentry + dedicated TG error bot |
+| CI/CD | GitHub Actions |
+| Linting | ESLint (flat config) + husky pre-commit |
+
+## Key Dependencies
+
+**AI & Web3**
+- `@anthropic-ai/sdk` — Claude API client
+- `@solana/web3.js` + `@solana/spl-token` — Solana SDK
+- `ethers` v6 — EVM interactions
+- `grammy` — Telegram bot framework
+
+**Infrastructure**
+- `@prisma/client` — ORM
+- `@upstash/redis` — Redis REST client
+- `@privy-io/server-auth` — Wallet signing
+- `express` + `socket.io` — HTTP + WebSocket
+
+**Security**
+- `helmet` — Security headers
+- `@sentry/node` — Error tracking
+- `jsonwebtoken` — JWT auth
+- `@hpke/core` + `@hpke/chacha20poly1305` — HPKE encryption for key export
+
+**Utilities**
+- `zod` — Runtime schema validation
+- `winston` — Structured logging
+- `dotenv` — Env var loading
+
+## Why These Choices
+
+**Grammy over Telegraf.** Modern API, better TypeScript support, cleaner middleware model.
+
+**Claude over OpenAI.** Claude's tool use is more reliable for agentic loops. We run up to 5 tool rounds per message — fewer hallucinated tool names, better reasoning.
+
+**Neon Postgres over RDS.** Serverless, auto-suspending, generous free tier. Perfect for pre-launch.
+
+**Upstash Redis over self-hosted.** REST API means no connection management. Works seamlessly with serverless.
+
+**Privy over in-house key management.** Keys live in a TEE. We never touch them. Reduces security surface area to zero.
+
+**Jupiter over Raydium direct.** Single API covers every Solana DEX with automatic routing.
+
+**Multiple EVM aggregators.** Odos/KyberSwap have better pricing; Uniswap V3/V4 as fallback for V4 pools that aggregators haven't indexed yet.

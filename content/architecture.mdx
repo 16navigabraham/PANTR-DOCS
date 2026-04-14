@@ -1,0 +1,87 @@
+---
+title: Architecture
+---
+
+# Architecture
+
+## System Overview
+
+```
+Telegram User
+     |
+     v
+Grammy Bot (src/bot/)
+     |
+     v
+Claude API (Anthropic)
+     |  tool_use calls
+     v
+Tool Executor (src/services/llm/tool-executor.js)
+     |
+     +---> TradeOrchestrator ---> Solana (Jupiter) / Base (Odos, KyberSwap, Uniswap)
+     +---> WalletService ------> Privy TEE (signing)
+     +---> PriceOracle --------> DEXScreener, Jupiter, Alchemy
+     +---> TokenSafety --------> GoPlus (EVM), RugCheck (Solana)
+     |
+     v
+Neon Postgres (Prisma) + Upstash Redis
+```
+
+## Request Flow — Private Message
+
+1. User sends message to `@PantrAgent_bot`
+2. `message-handler.js` looks up or auto-creates user in DB
+3. Rate limiter checks daily/burst limits
+4. Conversation history loaded from Redis (last 20 messages, 24h TTL)
+5. Claude API called with system prompt + tools + history
+6. Claude responds with text and/or `tool_use` blocks
+7. Tool executor runs each tool, returns results to Claude
+8. Claude generates final response (up to 5 tool rounds)
+9. Response sent to user via Telegram (split if >4096 chars)
+
+## Request Flow — Group Message
+
+Two paths:
+
+**Bot Mention** (`@PantrAgent_bot what's BONK price?`)
+- Public queries (price, safety, trending) → respond in-group
+- Private queries (balance, portfolio, trading) → redirect to DM
+
+**Alpha Caller CA Detection**
+- Message from a subscribed caller containing a contract address
+- Auto-buy triggered → user notified in DM
+
+## Project Structure
+
+```
+src/
+├── bot/                          # Telegram bot (Grammy)
+│   ├── index.js
+│   └── handlers/
+│       ├── message-handler.js    # Private DMs
+│       └── alpha.js              # Groups + alpha callers
+├── config/                       # Env var validation (Zod)
+├── lib/                          # Prisma, Redis, Sentry, trade queue
+├── middleware/                   # Auth, rate limiting, scanner shield
+├── routes/                       # Express API endpoints
+├── services/
+│   ├── llm/                      # Claude integration
+│   ├── swap/                     # DEX integrations
+│   ├── safety/                   # Token risk checks
+│   ├── wallet/                   # Privy operations
+│   ├── trade-orchestrator.js     # Main trading engine
+│   ├── auto-sell.js              # TP/SL monitoring
+│   └── price-oracle.js           # Multi-source pricing
+├── utils/                        # Logger, activity gate, safe interval
+└── index.js                      # Server entry point
+```
+
+## Design Principles
+
+**Claude-first.** Every user interaction goes through Claude. No hardcoded command handlers. If you want new functionality, you add a tool — you never add a slash command.
+
+**Stateless services.** Background jobs are crash-resilient (SafeInterval) and idempotent. The activity gate lets Neon Postgres sleep when nobody's around.
+
+**Safety gates everywhere.** Every trade checks token safety, daily limits, risk score, and honeypot status before executing. Fees are baked into every swap.
+
+**No key handling.** All wallet signing happens in Privy's TEE. The server never sees a private key.
