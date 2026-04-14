@@ -4,25 +4,27 @@ title: Deposit Notifications
 
 # Deposit Notifications
 
-Real-time alerts when a user receives SOL, ETH, or USDC into their Pantr wallet. Powered by websocket subscriptions rather than polling, so cost scales with **chains** — not users.
+Real-time alerts when a user receives SOL, ETH, or USDC into their Pantr wallet. Powered by websocket subscriptions with **server-side filtering** so cost scales with `O(users)` delivery, not with chain activity.
 
 Service: `src/services/deposit-monitor.js`
 
-> **Base monitoring is currently disabled** to avoid burning Alchemy credits. See [Base Deposit Monitoring Disabled](#base-deposit-monitoring-disabled) below. Solana monitoring remains active.
+## Why Server-Side Filtering Matters
 
-## Why Websockets
+A naive "subscribe to all USDC Transfer events and filter client-side" implementation looks clean but is catastrophic on a paid RPC:
 
-Polling every wallet every N seconds costs `O(users × chains)` RPC calls. At 1000 users across 2 chains with a 30s poll that's 2000 calls/30s — wasteful and slow.
+- USDC on Base processes **hundreds of `Transfer` events per minute**
+- Alchemy bills WebSocket subscriptions at `0.04 CU per byte delivered` (~40 CU per event)
+- Even with zero deposits, you burn ~10M+ compute units per day just receiving events you throw away
 
-Websocket subscriptions are `O(chains)`: one persistent connection per chain pushes events as they happen.
+The fix is to push filtering to the RPC provider. Alchemy delivers only events that match — for a handful of users with no active deposits, that's ~zero events per day.
 
 ## Coverage
 
 | Chain | Token | Mechanism |
 |-------|-------|-----------|
-| Solana | SOL (native) | `onAccountChange` per wallet → balance delta |
-| Base | ETH (native) | WS `block` event → scan mined txs for `tx.to ∈ tracked addresses` |
-| Base | USDC | Single `Transfer` log subscription → filter `topics[2]` client-side |
+| Solana | SOL (native) | `onAccountChange` per wallet → lamport balance delta |
+| Base | USDC | `eth_subscribe('logs', …)` with recipient (`topics[2]`) filtered to tracked wallets |
+| Base | ETH (native) | `eth_subscribe('alchemy_minedTransactions', …)` with `to` address filter |
 
 ### Minimum thresholds
 
@@ -35,11 +37,12 @@ Tiny dust transfers are ignored to avoid notification spam:
 ## Architecture
 
 ```
-┌───────────────────────┐    ┌───────────────────────┐
-│  Solana RPC (WSS)     │    │  Base WSS (Alchemy)   │
-│  onAccountChange      │    │  Transfer logs +      │
-│  per wallet           │    │  block subscription   │
-└──────────┬────────────┘    └──────────┬────────────┘
+┌───────────────────────┐    ┌────────────────────────────────┐
+│  Solana RPC (WSS)     │    │  Base WSS (Alchemy)            │
+│  onAccountChange      │    │  logs[USDC, topics[2]=users]   │
+│  per wallet           │    │  alchemy_minedTransactions     │
+│                       │    │    {addresses: [{to: user}]}   │
+└──────────┬────────────┘    └──────────┬─────────────────────┘
            │                            │
            └─────────────┬──────────────┘
                          ▼
@@ -47,6 +50,7 @@ Tiny dust transfers are ignored to avoid notification spam:
             │    DepositMonitor      │
             │  solWallets: Map       │  (base58, case-preserved)
             │  evmWallets: Map       │  (lowercased 0x)
+            │  baseSubs: Map         │  (sub id → 'usdc' | 'eth')
             └────────────┬───────────┘
                          ▼
             ┌────────────────────────┐
@@ -61,9 +65,31 @@ Tiny dust transfers are ignored to avoid notification spam:
 
 1. **On startup** — `DepositMonitor.start()` loads every active wallet from the DB into two in-memory maps (split by chain because Solana base58 is case-sensitive, EVM is not).
 2. **Solana** — calls `onAccountChange(pubkey)` for each SOL wallet. The handler tracks the previous lamport balance and fires `handleDeposit` on any positive delta ≥ threshold.
-3. **Base USDC** — one log filter on the USDC contract for the `Transfer(address,address,uint256)` topic. The recipient (`topics[2]`) is checked against `evmWallets` — match = fire.
-4. **Base ETH** — subscribes to `block` events. For each mined block, fetches full transactions and scans `tx.to` against `evmWallets`.
-5. **On new wallet** — `wallet-service.createWallet()` calls `depositMonitor.addWallet(address, userId, chain)` so new users get covered without a restart.
+3. **Base USDC** — single `eth_subscribe('logs', {...})` with `address: USDC_CONTRACT` and `topics: [Transfer, null, [paddedUser1, paddedUser2, ...]]`. Alchemy only delivers events where `topics[2]` (the indexed recipient) matches a tracked wallet. Client-side is just `handleBaseUsdcLog` decoding the amount and firing.
+4. **Base ETH** — single `eth_subscribe('alchemy_minedTransactions', {addresses: [{to: wallet}, ...]})`. Alchemy delivers only txs with a matching `to` address. Handler reads `tx.value` and fires.
+5. **On new wallet** — `wallet-service.createWallet()` calls `depositMonitor.addWallet(address, userId, chain)`. For Base, this triggers `resubscribeBase()` which unsubscribes the old filters and recreates them with the updated wallet set (ensures the new user is covered without a restart).
+
+## Raw WebSocket, Not ethers.WebSocketProvider
+
+Base monitoring uses a raw `ws` WebSocket directly rather than `ethers.WebSocketProvider`. Two reasons:
+
+1. **Custom subscription types** — `alchemy_minedTransactions` is an Alchemy-specific method. Ethers provider abstracts subscriptions and doesn't cleanly expose arbitrary ones.
+2. **Message routing** — with custom subs, we need to read raw JSON-RPC responses to map subscription IDs back to subscription types (`'usdc'` vs `'eth'`).
+
+`handleBaseWsMessage()` parses each incoming frame and routes it:
+
+- `{ id, result: "0x<subId>" }` → store `subId → type` mapping
+- `{ method: "eth_subscription", params: { subscription, result } }` → look up type and dispatch to `handleBaseUsdcLog` or `handleBaseMinedTx`
+
+## WS Crash Protection
+
+Base WebSocket connection uses a two-step handshake to prevent server crashes:
+
+1. Create a raw `WebSocket` with an error handler attached
+2. If handshake fails (e.g. 429 rate limit), resolve `null` instead of throwing
+3. Only proceed with subscriptions after successful handshake
+
+Without this, a rejected handshake throws an uncaught async error that crashes the Node process. On Render, this previously triggered an immediate restart → another 429 → crash loop.
 
 ## Notification
 
@@ -80,37 +106,11 @@ Chain: SOLANA
 
 It also emits a `deposit:received` WebSocket event for the dashboard.
 
-## WS Crash Protection
-
-The Base WebSocket provider uses a two-step connection to prevent server crashes:
-
-1. Create a raw `WebSocket` with an error handler attached
-2. If handshake fails (e.g. 429 rate limit), resolve `null` instead of throwing
-3. Only pass the connected WS to `ethers.WebSocketProvider` after successful handshake
-
-Without this, `ethers.WebSocketProvider` throws an uncaught async error on handshake failure, crashing the entire Node process. On Render, this triggers an immediate restart → another 429 → crash loop.
-
 ## Reconnect
 
-Base WS reconnects with exponential backoff (1s → 30s max, capped at 10 attempts) on `close` or handshake failure. After 10 failed attempts, Base monitoring is disabled until the next server restart. Subscriptions are rebuilt from the in-memory map, which is the source of truth.
+Base WS reconnects with exponential backoff (1s → 30s max, capped at 10 attempts) on `close` or handshake failure. After 10 failed attempts, Base monitoring is disabled until the next server restart. Subscription state is cleared and rebuilt from the in-memory wallet map, which is the source of truth.
 
 Solana reconnects are handled by `@solana/web3.js` Connection internally.
-
-## Activity Gate
-
-Not needed — websockets are idle-friendly (no polling cost). The monitor stays connected 24/7. Block scans are skipped when `evmWallets.size === 0`.
-
-## Config
-
-```env
-# Required for Base monitoring (native ETH + USDC)
-BASE_WS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
-
-# Solana uses the existing RPC URL (must be WS-capable)
-SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<key>
-```
-
-Without `BASE_WS_URL`, Base monitoring is skipped with a warning — Solana still works.
 
 ## Trade Suppression
 
@@ -126,33 +126,26 @@ Solana's `onAccountChange` doesn't provide a transaction hash, so txHash filteri
 
 Both mechanisms are triggered from the trade orchestrator's `onTxSent` hook, which passes `{ txHash, userId }`.
 
-## Base Deposit Monitoring Disabled
+## Config
 
-Base WSS monitoring is **gated behind an env flag** (`DISABLE_BASE_DEPOSIT_MONITOR`) and **disabled by default** as of 2026-04-14. It was burning Alchemy credits at an unsustainable rate.
+```env
+# Required for Base monitoring (native ETH + USDC)
+BASE_WS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
 
-### Why
+# Solana uses the existing RPC URL (must be WS-capable)
+SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<key>
+```
 
-Two mechanisms were wrecking the credit budget:
+Without `BASE_WS_URL`, Base monitoring is skipped with a warning — Solana still works.
 
-1. **Full block scans every 2s** — `scanBaseBlock` called `getBlock(n, true)` with `prefetchTransactions = true` on every mined block (~43,200 blocks/day). Each call costs ~20 compute units regardless of whether any tracked wallet was involved.
-2. **USDC Transfer log subscription** — subscribed to every USDC Transfer event on Base with client-side filtering. USDC is one of the most active contracts on the chain, delivering hundreds of events per minute to the server, each counting against the Alchemy quota.
+## Previous Broken Implementation (For Reference)
 
-Result: ~300M compute units consumed in days, with zero actual deposits detected most of the time.
+Before 2026-04-14, the Base monitor used two mechanisms that burned ~300M Alchemy compute units in days:
 
-### Current Behavior
+1. **Full block scans every 2s** — `on('block', ...)` + `getBlock(n, true)` pulled full tx lists for every mined block regardless of tracked wallets.
+2. **Unfiltered USDC log subscription** — subscribed to every `Transfer` event on the USDC contract with client-side filtering. USDC delivers hundreds of events per minute on Base; every one was billed before being thrown away.
 
-- Users are still informed of Base deposits when they ask `check_balance` or when a trade completes.
-- Solana monitoring (cheap per-wallet `onAccountChange` on Helius) is unaffected.
-- `startBase()` bails early with a warning log if the flag isn't explicitly set to `false`.
-
-### Re-enabling
-
-Set `DISABLE_BASE_DEPOSIT_MONITOR=false` in environment. Before doing so, switch the implementation to one of:
-
-- **Option A — `alchemy_minedTransactions` with `toAddress` filter**: server-side filtering by Alchemy, near-zero CU cost. Alchemy-specific.
-- **Option B — periodic `getBalance` polling**: poll `eth_getBalance` + USDC `balanceOf` for each tracked wallet every 30–60s via HTTP RPC. Scales with users, not chain activity. RPC-portable.
-
-The current `on('block', ...)` + `on({ Transfer })` implementation should **not** be re-enabled as-is.
+Both were replaced with the server-side filtered subscriptions documented above. Do not revert.
 
 ## Not Covered (Yet)
 
