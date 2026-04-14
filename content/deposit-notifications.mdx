@@ -8,6 +8,8 @@ Real-time alerts when a user receives SOL, ETH, or USDC into their Pantr wallet.
 
 Service: `src/services/deposit-monitor.js`
 
+> **Base monitoring is currently disabled** to avoid burning Alchemy credits. See [Base Deposit Monitoring Disabled](#base-deposit-monitoring-disabled) below. Solana monitoring remains active.
+
 ## Why Websockets
 
 Polling every wallet every N seconds costs `O(users × chains)` RPC calls. At 1000 users across 2 chains with a 30s poll that's 2000 calls/30s — wasteful and slow.
@@ -123,6 +125,34 @@ When a user executes a trade, the resulting balance change should not trigger a 
 Solana's `onAccountChange` doesn't provide a transaction hash, so txHash filtering can't work. Instead, `suppressUser(userId)` adds the user to a `suppressedUsers` Set with a 60-second TTL. Any deposit detected for that user during the window is silently ignored.
 
 Both mechanisms are triggered from the trade orchestrator's `onTxSent` hook, which passes `{ txHash, userId }`.
+
+## Base Deposit Monitoring Disabled
+
+Base WSS monitoring is **gated behind an env flag** (`DISABLE_BASE_DEPOSIT_MONITOR`) and **disabled by default** as of 2026-04-14. It was burning Alchemy credits at an unsustainable rate.
+
+### Why
+
+Two mechanisms were wrecking the credit budget:
+
+1. **Full block scans every 2s** — `scanBaseBlock` called `getBlock(n, true)` with `prefetchTransactions = true` on every mined block (~43,200 blocks/day). Each call costs ~20 compute units regardless of whether any tracked wallet was involved.
+2. **USDC Transfer log subscription** — subscribed to every USDC Transfer event on Base with client-side filtering. USDC is one of the most active contracts on the chain, delivering hundreds of events per minute to the server, each counting against the Alchemy quota.
+
+Result: ~300M compute units consumed in days, with zero actual deposits detected most of the time.
+
+### Current Behavior
+
+- Users are still informed of Base deposits when they ask `check_balance` or when a trade completes.
+- Solana monitoring (cheap per-wallet `onAccountChange` on Helius) is unaffected.
+- `startBase()` bails early with a warning log if the flag isn't explicitly set to `false`.
+
+### Re-enabling
+
+Set `DISABLE_BASE_DEPOSIT_MONITOR=false` in environment. Before doing so, switch the implementation to one of:
+
+- **Option A — `alchemy_minedTransactions` with `toAddress` filter**: server-side filtering by Alchemy, near-zero CU cost. Alchemy-specific.
+- **Option B — periodic `getBalance` polling**: poll `eth_getBalance` + USDC `balanceOf` for each tracked wallet every 30–60s via HTTP RPC. Scales with users, not chain activity. RPC-portable.
+
+The current `on('block', ...)` + `on({ Transfer })` implementation should **not** be re-enabled as-is.
 
 ## Not Covered (Yet)
 
