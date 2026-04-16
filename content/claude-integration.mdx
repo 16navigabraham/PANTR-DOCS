@@ -14,7 +14,7 @@ User: "buy $10 of BONK on solana"
                 v
         System Prompt (parameterized with user state)
         + Conversation History (last 20 messages from Redis)
-        + Tool Definitions (19 tools, filtered by premium status)
+        + Tool Definitions (28 tools, filtered by premium status)
                 |
                 v
           Claude API Call
@@ -65,17 +65,29 @@ Key behavioral rules:
 - Keep responses under 500 characters (Telegram, not email)
 - Default to SOLANA unless user specifies otherwise
 - Never reveal private keys
-- Confirm trades over $50 before executing
-- Confirm all withdrawals before executing
-- Warn on high-risk tokens
+- **Pre-trade confirmation**: before executing ANY buy, sell, swap, or withdrawal, Claude must call `check_balance` first, calculate the 2% fee + gas estimate, present a summary to the user, and wait for explicit confirmation before calling the trade tool
+- Confirm all withdrawals before executing (repeat address, amount, chain)
+- Warn on high-risk tokens (above user's `maxRiskScore`)
 - Use `search_token` when user mentions a token by name without a CA
+- **Multi-message responses**: use `---` separator on its own line to split into separate Telegram messages (used for onboarding)
+
+### Onboarding Flow
+
+When a new user sends `/start` and has no wallets:
+
+1. Claude asks: "Are you new, or do you have an existing account to recover?"
+2. If new → calls `setup_wallets` → sends **two messages** via `---` separator:
+   - Message 1: introduces Pantr (what it does, key features)
+   - Message 2: shows created wallet addresses with deposit instructions
+3. If recovering → guides through `recover_account` (email → verification code)
 
 ## Conversation Manager
 
 `src/services/llm/conversation-manager.js`
 
 - **Storage**: Upstash Redis
-- **Key format**: `conv:{userId}`
+- **Key format**: `conv:{promptHash}:{userId}` — includes an MD5 hash of the system prompt template
+- **Auto-invalidation**: when the system prompt code changes, the hash changes → old conversation keys become orphans and expire via TTL. No manual cache clearing needed.
 - **TTL**: 24 hours (conversations reset daily)
 - **Window**: 20 messages max (sliding — oldest dropped)
 - **Graceful degradation**: if Redis is down, conversation starts fresh (no crash)
@@ -86,8 +98,9 @@ Key behavioral rules:
 
 | Tier | Daily Limit | Burst Limit |
 |------|-------------|-------------|
-| Free | 15 messages | 5 per minute |
+| Free | 15 messages/day | 5 per minute |
 | Premium | Unlimited | 15 per minute |
+
 
 - Uses Redis for daily counter (resets at midnight UTC)
 - Premium users skip the daily counter entirely
@@ -95,7 +108,7 @@ Key behavioral rules:
 
 ## Tool Definitions
 
-29 tools total. Filter logic in `getToolDefinitions(user)`:
+28 tools total. Filter logic in `getToolDefinitions(user)`:
 
 ### Available to All
 

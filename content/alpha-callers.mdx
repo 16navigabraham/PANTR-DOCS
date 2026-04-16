@@ -26,7 +26,7 @@ Alpha callers are users in Telegram groups whose contract address (CA) messages 
          |
          v
    For each subscriber:
-     1. Check daily limit (free: 5/day, premium: unlimited)
+     1. Check daily limit (free: 1/day, premium: unlimited)
      2. Dedup check (Redis key: alpha:seen:{groupId}:{msgId})
      3. Run safety check on token
      4. Execute buy via orchestrator
@@ -49,7 +49,7 @@ Via the `manage_alpha_callers` tool:
 
 | Tier | Alpha Auto-buys/Day |
 |------|---------------------|
-| Free | 5 |
+| Free | 1 |
 | Premium | Unlimited |
 
 Tracked via Redis key: `alpha:buys:{userId}` with 24h TTL.

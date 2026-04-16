@@ -6,13 +6,29 @@ title: Trading Engine
 
 The `TradeOrchestrator` (`src/services/trade-orchestrator.js`) is the central trading engine. All buys, sells, and swaps flow through it.
 
+## Pre-Trade Confirmation
+
+Before executing ANY buy, sell, swap, or withdrawal, Claude must:
+
+1. Call `check_balance` to get the user's current balance
+2. Calculate the 2% platform fee from the trade amount
+3. Estimate gas cost (Solana ~0.000005 SOL, Base ~$0.01-0.05 in ETH)
+4. Present a summary and wait for user confirmation before calling the trade tool
+
+Example: "Buying $30 of BONK: $0.60 platform fee + ~$0.01 gas. You'll spend ~$30.61 total. Confirm?"
+
+Exceptions (no confirmation needed): auto-sell triggers, alpha auto-buys, and info queries.
+
 ## Buy Flow
 
 ```
 User: "buy $10 of DezXAZ..."
          |
          v
-   Tool Executor → orchestrator.buyToken()
+   Claude: check_balance → calculate fee + gas → show summary
+         |
+         v
+   User confirms → Tool Executor → orchestrator.buyToken()
          |
          v
    1. Validate user + wallet
@@ -90,17 +106,23 @@ Each aggregator:
 
 ## Fees
 
-| Tier | Fee |
-|------|-----|
-| Free | 1% (100 bps) |
-| Premium | 0.5% (50 bps) |
+All users pay a flat **2% trade fee** (200 bps) on every trade — buy, sell, or swap. No fee difference between free and premium tiers.
 
 Fee is deducted from the input amount before the swap:
 
-- Free user buys $10 → $0.10 fee → $9.90 swapped
+- User buys $10 → $0.20 fee → $9.80 swapped
 - Fee transferred to treasury wallet after swap confirms
 
 Fee collection: `src/services/fee-collector.js`
+
+## Gas Costs
+
+Every on-chain transaction costs network gas, separate from the platform fee:
+
+- **Solana**: ~0.000005 SOL per transaction
+- **Base**: ~$0.01-0.05 in ETH per transaction
+
+Base trades always require ETH for gas regardless of what token is being traded. Users need a small ETH balance to cover gas on Base.
 
 ## Stuck Trade Resolution
 
