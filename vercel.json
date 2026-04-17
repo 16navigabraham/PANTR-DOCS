@@ -1,6 +1,6 @@
 {
   "framework": null,
-  "buildCommand": "npx next build && npx pagefind --site out --output-path out/_pagefind",
+  "buildCommand": "git fetch --unshallow 2>/dev/null || true && npx next build && npx pagefind --site out --output-path out/_pagefind",
   "outputDirectory": "out",
   "cleanUrls": true,
   "trailingSlash": false
