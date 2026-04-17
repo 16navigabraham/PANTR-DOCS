@@ -76,7 +76,7 @@ export default async function RootLayout({
             <Footer>
               <span>
                 {new Date().getFullYear()} Pantr — Built by{' '}
-                <a href="https://x.com/AbrahamNAVIG1" target="_blank" rel="noopener">@AbrahamNAVIG1</a>
+                <a href="mailto:ZeLabsS365@gmail.com" target="_blank" rel="noopener">ZeLabs</a>
               </span>
             </Footer>
           }
