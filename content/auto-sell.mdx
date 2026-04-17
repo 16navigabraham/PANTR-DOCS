@@ -32,30 +32,54 @@ Background job runs every 5 seconds (`src/services/auto-sell.js`):
 2. For each user:
    a. Get all confirmed BUY trades (open positions)
    b. For each position:
-      - Get current on-chain token balance
-      - Get current price (DEXScreener/Jupiter)
-      - Calculate cost basis from trade records
+      - Use FIFO cost basis (proportional, not cumulative all-time spend)
+      - Get current price (batched, 15s cache)
       - Calculate unrealized P&L %
-      - If P&L >= takeProfitPct → SELL (take profit)
-      - If P&L <= -stopLossPct → SELL (stop loss)
-   c. Execute sell via orchestrator
+      - TP: if P&L >= takeProfitPct → SELL (exact threshold)
+      - SL: if P&L <= -(stopLossPct - slippageBuffer) → SELL (pre-trigger)
+   c. Execute sell via orchestrator (uses on-chain balance for exact amount)
    d. Notify user in Telegram DM
 ```
 
+## Slippage-Aware Stop-Loss
+
+The stop-loss triggers **before** the user's exact threshold so that after execution slippage + fees, the realised loss lands close to what the user set.
+
+**Slippage buffer formula:**
+
+```
+slippageBufferPct = min((maxSlippageBps / 10000) * 100 * 0.2, 5)
+```
+
+It uses 20% of the user's max slippage setting as the estimated real slippage, capped at 5%.
+
+| Max Slippage | Slippage Buffer | SL trigger (if user sets 50%) |
+|---|---|---|
+| 1500 bps (15%) | 3% | -47% |
+| 2000 bps (20%) | 4% | -46% |
+| 2500 bps (25%) | 5% (capped) | -45% |
+
+**Why TP doesn't get a buffer:** take-profit fires at the exact threshold. Adding a buffer would mean never triggering on volatile memecoins — better to sell at target and receive slightly less after slippage than to overshoot and miss the exit entirely.
+
 ## Example
 
-Settings: TP 100%, SL 50%
+Settings: TP 100%, SL 50%, max slippage 1500 bps (15%) → SL buffer = 3%
 
 - Bought 1000 DEGEN at $0.01 (cost: $10)
-- Current price: $0.02 → value: $20 → P&L: +100% → **TP triggered, sell**
-- Current price: $0.005 → value: $5 → P&L: -50% → **SL triggered, sell**
+- Price hits $0.02 → P&L +100% → **TP triggered at 100%** → sells, actual realised may be 95-98% after slippage
+- Price drops to $0.0053 → P&L -47% → **SL triggered at -47%** → after slippage, realised loss lands near -50%
 
-## Constraints
+## Dust + Grace Period Guards
 
-- Minimum position size: $0.50 (gas costs exceed value below this)
-- Stablecoins excluded (USDC, USDT — not speculative)
-- Only checks positions with confirmed BUY trades
-- Skips tokens with zero on-chain balance (already sold manually)
+- **Minimum position**: $0.50 — below this, gas cost exceeds the sell value
+- **Grace period**: 5 minutes after a buy — prevents pump.fun buy-slippage (which can show -20% instantly) from firing a false stop-loss
+- **Confirmed-empty cache**: tokens confirmed not held on-chain are skipped in the next cycles to avoid repeated Alchemy scans
+- **Stablecoins excluded**: USDC/USDT on both chains never trigger TP/SL
+- **Dust epsilon**: positions below `0.000001` held are filtered (floating-point residue after selling)
+
+## Actual P&L Reporting
+
+The trigger fires on an estimated P&L (current price × held tokens vs cost basis). After the sell confirms, the actual realised P&L is recalculated using FIFO cost basis from the confirmed sell trade's `amountOutUsd`, so the user's Telegram notification shows the **real** P&L — not the trigger-time estimate.
 
 ## Activity Gate
 
