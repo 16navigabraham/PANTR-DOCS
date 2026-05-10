@@ -60,7 +60,7 @@ export default async function RootLayout({
       <body>
         <Layout
           pageMap={pageMap}
-          docsRepositoryBase="https://github.com/AbrahamNAVIG1/PANTR-DOCS/tree/main/content"
+          docsRepositoryBase="https://github.com/16navigabraham/PANTR-DOCS/tree/main/content"
           nextThemes={{ defaultTheme: 'dark' }}
           navbar={
             <Navbar
@@ -69,7 +69,7 @@ export default async function RootLayout({
                   <span style={{ fontFamily: 'Outfit', fontWeight: 700, fontSize: '1.25rem' }}>Pantr Docs</span>
                 </span>
               }
-              projectLink="https://github.com/AbrahamNAVIG1/pantr-server"
+              projectLink="https://github.com/16navigabraham/pantr-server"
             />
           }
           footer={
