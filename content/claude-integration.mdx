@@ -44,9 +44,7 @@ User: "buy $10 of BONK on solana"
 
 - Uses `@anthropic-ai/sdk`
 - **Agentic loop**: up to 5 tool rounds per message
-- Model selection:
-  - DMs: `claude-sonnet-4-20250514` (more capable)
-  - Groups: `claude-haiku-4-5-20251001` (cheaper, faster)
+- Model selection: `claude-sonnet-4-20250514` for both DMs and groups (overridable via `CLAUDE_MODEL` / `CLAUDE_GROUP_MODEL` env vars)
 - Max tokens: 1024 per response
 - Retries: 2 attempts with exponential backoff
 
@@ -98,17 +96,14 @@ When a new user sends `/start` and has no wallets:
 
 | Tier | Daily Limit | Burst Limit |
 |------|-------------|-------------|
-| Free | 15 messages/day | 5 per minute |
+| Free | 5 messages/day | 3 per minute |
 | Premium | Unlimited | 15 per minute |
 
-
-- Uses Redis for daily counter (resets at midnight UTC)
-- Premium users skip the daily counter entirely
-- Burst limit still applies to premium (prevents API abuse)
+Daily counter in Redis, resets at midnight UTC (TTL 86400s). Premium skips the daily counter entirely but burst still applies. Redis down → fail open (request allowed through).
 
 ## Tool Definitions
 
-28 tools total. Filter logic in `getToolDefinitions(user)`:
+32 tools total. Filter logic in `getToolDefinitions(user)`:
 
 ### Available to All
 
@@ -116,7 +111,7 @@ When a new user sends `/start` and has no wallets:
 
 ### Premium Only
 
-`schedule_action`, `set_auto_sell`, `set_limit_order`, `set_dca`
+`schedule_action`, `set_price_alert`, `set_limit_order`, `set_wallet_tracker`, `set_dca`, `list_monitors`, `cancel_monitor`
 
 If a free user asks for a premium feature, Claude tells them it's premium-only and suggests `subscribe_premium`.
 

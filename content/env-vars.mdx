@@ -4,59 +4,42 @@ title: Environment Variables
 
 # Environment Variables
 
-Full reference across all three services.
+## pantr-server (Render)
 
----
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Neon Postgres connection string |
+| `REDIS_URL` | Upstash Redis — conversation history + rate limits |
+| `TELEGRAM_BOT_TOKEN` | From @BotFather |
+| `ANTHROPIC_API_KEY` | Claude API |
+| `PRIVY_APP_ID` | Privy app ID |
+| `PRIVY_APP_SECRET` | Privy app secret |
+| `PRIVY_WALLET_API_URL` | Privy server wallet endpoint |
+| `JWT_SECRET` | JWT signing secret |
+| `ADMIN_SECRET` | Admin dashboard password + `/api/admin` auth |
+| `SOLANA_RPC_URL` | Helius or QuickNode |
+| `BASE_RPC_URL` | Base RPC (Alchemy or QuickNode) |
+| `BASE_FLASHBOTS_RPC_URL` | Flashbots Protect — hides Base trades from MEV bots |
+| `JUPITER_API_URL` | Jupiter swap aggregator |
+| `FRONTEND_URL` | Main CORS origin |
+| `CORS_ORIGINS` | Extra origins comma-separated (analytics.pantr.xyz, admin.pantr.xyz) |
+| `SENDGRID_API_KEY` | Email for account recovery codes |
+| `FROM_EMAIL` | Sender address for those emails |
+| `PORT` | Default 3000 |
 
-## pantr-server
+## pantr-admin (Vercel)
 
-Set in Render → Environment.
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | Postgres connection string (Neon) |
-| `REDIS_URL` | ✅ | Upstash Redis URL (conversation history + rate limits) |
-| `TELEGRAM_BOT_TOKEN` | ✅ | From @BotFather |
-| `ANTHROPIC_API_KEY` | ✅ | Claude API key |
-| `PRIVY_APP_ID` | ✅ | Privy app ID (wallet creation) |
-| `PRIVY_APP_SECRET` | ✅ | Privy app secret |
-| `PRIVY_WALLET_API_URL` | ✅ | Privy server wallet endpoint |
-| `JWT_SECRET` | ✅ | Secret for signing JWTs |
-| `ADMIN_SECRET` | ✅ | Password for admin dashboard + `/api/admin` routes |
-| `SOLANA_RPC_URL` | ✅ | Helius or QuickNode Solana RPC |
-| `BASE_RPC_URL` | ✅ | Base chain RPC (Alchemy or QuickNode) |
-| `JUPITER_API_URL` | ✅ | Jupiter swap aggregator (usually `https://quote-api.jup.ag`) |
-| `FRONTEND_URL` | ✅ | Allowed CORS origin (e.g. `https://app.pantr.xyz`) |
-| `SENDGRID_API_KEY` | ✅ | Email for account recovery verification codes |
-| `FROM_EMAIL` | ✅ | Sender address for verification emails |
-| `PORT` | ❌ | HTTP port. Default 3000 |
-| `NODE_ENV` | ❌ | Set to `production` on Render |
-| `CORS_ORIGINS` | ❌ | Comma-separated extra CORS origins (add `analytics.pantr.xyz`, `admin.pantr.xyz`) |
-
----
-
-## pantr-admin
-
-Set in Vercel → Project → Settings → Environment Variables.
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ADMIN_SECRET` | ✅ | Must match `ADMIN_SECRET` on pantr-server exactly |
-| `PANTR_API_URL` | ✅ | `https://api.pantr.xyz` |
-
----
+| Variable | Description |
+|----------|-------------|
+| `ADMIN_SECRET` | Must match the one on pantr-server exactly |
+| `PANTR_API_URL` | `https://api.pantr.xyz` |
 
 ## pantr-analytics
 
-Static HTML — no server, no env vars. The API URL (`https://api.pantr.xyz/api/analytics`) is hardcoded in `index.html`.
-
-If the API URL changes, update the `const API` line at the top of the script block.
+Static HTML, no env vars. API URL is hardcoded in `index.html` — update the `const API` line if it ever changes.
 
 ---
 
-## Notes
+`ADMIN_SECRET` is the same value on both server and admin — the admin proxies it as a Bearer token and the server checks it.
 
-- `ADMIN_SECRET` must be identical on both pantr-server and pantr-admin — the admin frontend sends it as a Bearer token, and the server verifies it.
-- Never commit any of these to git. All `.env` files are in `.gitignore`.
-- Render injects env vars at runtime — no `.env` file needed on the server.
-- For local development, copy `.env.example` to `.env` and fill in values.
+Never commit `.env` files. Render injects vars at runtime so no `.env` needed there. Locally, copy `.env.example` → `.env`.

@@ -4,123 +4,77 @@ title: Error Handling
 
 # Error Handling
 
-How Pantr handles failures across trades, external services, and infrastructure.
-
----
-
 ## Trade Failures
 
-Trade tools (`buy_token`, `sell_token`, `swap_tokens`) always return a structured result:
+Trade tools always return `{ status: "SUCCESS" | "FAILED", txHash, error }`.
 
+On failure the result also includes:
 ```json
-{ "status": "SUCCESS" | "FAILED", "txHash": "...", "error": "..." }
+{ "is_error": true, "IMPORTANT": "DO NOT tell the user the trade succeeded. It failed." }
 ```
 
-On failure, the tool result also includes:
-```json
-{
-  "is_error": true,
-  "IMPORTANT": "DO NOT tell the user the trade succeeded. It failed."
-}
-```
+`is_error` signals to Claude the tool call failed. The `IMPORTANT` field is an explicit override so Claude doesn't hallucinate a success message from ambiguous output.
 
-The `is_error` flag tells Claude the tool call failed. The `IMPORTANT` field is an explicit override — Claude won't misinterpret a failed swap as successful. Without this, Claude could hallucinate a success message from ambiguous error output.
-
-### Common Trade Errors
-
-| Error | Cause | User-facing message |
-|-------|-------|---------------------|
-| `INSUFFICIENT_BALANCE` | Not enough SOL/ETH for amount + gas | "Not enough balance" |
-| `SLIPPAGE_EXCEEDED` | Price moved beyond slippage tolerance | "Try again or increase slippage" |
-| `TOKEN_NOT_FOUND` | CA not found on-chain | "Token not found on [chain]" |
-| `SAFETY_BLOCKED` | Token failed safety check | "Token flagged as high risk" |
-| `DAILY_LIMIT_REACHED` | User hit daily spend cap | "Daily limit reached ($X)" |
-| `TRADING_PAUSED` | User paused trading | "Trading is paused — resume to trade" |
+| Error | Cause |
+|-------|-------|
+| `INSUFFICIENT_BALANCE` | Not enough SOL/ETH for amount + gas |
+| `SLIPPAGE_EXCEEDED` | Price moved past tolerance |
+| `TOKEN_NOT_FOUND` | CA doesn't exist on-chain |
+| `SAFETY_BLOCKED` | Token failed safety check |
+| `DAILY_LIMIT_REACHED` | User hit daily spend cap |
+| `TRADING_PAUSED` | User paused trading |
 
 ---
 
-## External Service Failures
+## External Services
 
-### Jupiter (Solana swaps)
-- Retry: 2 attempts with exponential backoff
-- If quote fails: return `FAILED` with "No route found"
-- If TX fails on-chain: parse Solana error code → return human-readable reason
+**Jupiter** — 2 retries with backoff. Quote failure → `FAILED` "No route found". TX failure → parse Solana error code.
 
-### Base (EVM swaps)
-- Retry: 2 attempts
-- Gas estimation failure → fallback gas limit
-- Reverted TX → return revert reason from receipt
+**Base swaps** — 2 retries. Gas estimation failure → fallback gas limit. Reverted TX → return revert reason.
 
-### Privy (wallets)
-- Wallet creation failure → logged, user told to try again
-- Signing failure → trade aborted, `FAILED` status returned
+**Privy** — wallet creation failure logged, user told to retry. Signing failure aborts trade.
 
-### RugCheck / GoPlus (safety)
-- API timeout or 5xx → return risk score of 50 (neutral), log warning
-- Safety check never blocks a trade on API failure — it degrades gracefully
+**RugCheck / GoPlus** — timeout or 5xx → return risk score 50 (neutral), log warning. Never blocks a trade on API failure.
 
-### DEXScreener (prices/trending)
-- Timeout → cached result returned if available
-- No cache → return empty result, Claude tells user data unavailable
+**DEXScreener** — timeout → return cached result if available, otherwise empty. Claude tells user data is unavailable.
 
-### SendGrid (emails)
-- Failed send → logged, user told to check email or try again
-- Verification code still stored — user can retry without a new code for 10 minutes
+**SendGrid** — failed send logged, user told to check email or retry. Code stays valid 10 min so they can retry without requesting a new one.
 
 ---
 
-## Redis Failures
+## Redis Down
 
-Conversation history and rate limits live in Upstash Redis.
-
-- **Redis down during message**: conversation starts fresh (no history), rate limit skipped. Bot still responds.
-- **Redis down during rate limit check**: request allowed through (fail open). Logs a warning.
-- No crash — all Redis calls are wrapped in try/catch with graceful fallback.
+- Conversation starts fresh (no history), rate limit skipped, bot still responds.
+- All Redis calls are wrapped in try/catch — no crash.
 
 ---
 
 ## Claude API Failures
 
-`src/services/llm/claude-client.js`:
+2 retries with backoff. `overloaded_error` (529) → retry once after 2s. After retries exhausted → "I'm having trouble thinking right now, try again in a moment."
 
-- Retry: 2 attempts with exponential backoff on 5xx or network errors
-- `overloaded_error` (529): retry once after 2s
-- After retries exhausted: bot sends "I'm having trouble thinking right now, try again in a moment"
-
-Tool call loop is capped at 5 rounds. If Claude keeps calling tools without settling, loop breaks and returns the last partial response.
+Tool loop capped at 5 rounds. If Claude keeps calling tools without settling, loop breaks and returns the last partial response.
 
 ---
 
-## Bot-Level Errors
+## Bot-Level
 
-All Telegram message handlers are wrapped in try/catch. If anything throws:
-1. Error logged with `userId`, `chatId`, message text
-2. User receives: "Something went wrong. Try again."
-3. Bot stays alive — one user's error doesn't crash the process
+All message handlers are wrapped in try/catch. Any unhandled throw → log with userId + chatId → user gets "Something went wrong. Try again." Bot stays alive.
 
 ---
 
 ## Auto-Sell Failures
 
-If an auto-sell trigger fires but the sell fails (slippage, RPC error):
-- Logged as `FAILED` trade in DB
-- User notified via Telegram: "Auto-sell for [TOKEN] failed — [reason]"
-- Position remains open, next price check will retry if conditions still met
+Sell fails (slippage, RPC error) → logged as `FAILED` trade → user notified via Telegram. Position stays open, next price check retries if conditions still met.
 
 ---
 
-## Scheduled Action Failures
+## Scheduled Actions
 
-If a `ScheduledAction` fires and the underlying tool fails:
-- `ScheduledActionStatus` set to `FAILED`
-- User notified with the failure reason
-- Not retried automatically — user must reschedule
+Tool fails at execution time → `ScheduledActionStatus` → `FAILED` → user notified. Not retried automatically.
 
 ---
 
-## Monitor Poller Failures
+## Monitor Poller
 
-Individual monitor errors are caught per-monitor:
-- Bad config → monitor marked `CANCELLED`, user notified
-- RPC/API timeout → skipped this tick, retried next tick (60s)
-- One broken monitor never stops others from running
+Per-monitor errors caught individually. Bad config → monitor `CANCELLED` + user notified. RPC/API timeout → skip this tick, retry next (60s).
