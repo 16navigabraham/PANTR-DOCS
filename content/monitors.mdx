@@ -1,0 +1,109 @@
+---
+title: Monitors System
+---
+
+# Monitors System
+
+Monitors are background watchers that trigger actions automatically. **Premium only.**
+
+Four types: price alerts, limit orders, wallet trackers, DCA schedules. All stored in the `monitors` table.
+
+---
+
+## Data Model
+
+```prisma
+model Monitor {
+  id          String        @id @default(cuid())
+  userId      String
+  type        MonitorType
+  status      MonitorStatus @default(ACTIVE)
+  config      Json
+  description String?
+  createdAt   DateTime      @default(now())
+  lastChecked DateTime?
+  triggeredAt DateTime?
+}
+
+enum MonitorType {
+  PRICE_ALERT
+  LIMIT_ORDER
+  WALLET_TRACKER
+  DCA
+}
+
+enum MonitorStatus {
+  ACTIVE
+  TRIGGERED
+  CANCELLED
+  PAUSED
+}
+```
+
+The `config` JSON holds all monitor-specific params (tokenAddress, targetPrice, walletAddress, etc).
+
+---
+
+## Monitor Types
+
+### Price Alert (`PRICE_ALERT`)
+Sends a Telegram notification when a token crosses a price threshold (above or below). Does not execute a trade — notification only.
+
+Config fields: `tokenAddress`, `chain`, `targetPrice`, `direction` (`above | below`).
+
+### Limit Order (`LIMIT_ORDER`)
+Executes a buy or sell when price hits the target. One-time trigger — status becomes `TRIGGERED` after firing.
+
+Config fields: `tokenAddress`, `chain`, `targetPrice`, `direction`, `action` (`buy | sell`), `amountUsd` (for buy), `percentage` (for sell), `slippageBps`.
+
+### Wallet Tracker (`WALLET_TRACKER`)
+Watches an external on-chain wallet for new buy transactions. Optionally mirrors them — fires `buy_token` with `mirrorAmountUsd` for every detected buy.
+
+Config fields: `walletAddress`, `chain`, `mirror` (bool), `mirrorAmountUsd`.
+
+### DCA (`DCA`)
+Buys a fixed USD amount of a token every N hours. Runs until `maxBuys` is reached or user cancels.
+
+Config fields: `tokenAddress`, `chain`, `amountUsd`, `intervalHours`, `maxBuys`, `buyCount` (tracked internally).
+
+---
+
+## Background Poller
+
+`src/jobs/monitor-poller.js` — runs on a cron schedule (every 60 seconds).
+
+Flow per tick:
+1. Load all `ACTIVE` monitors
+2. Group by type, check each
+3. Price alert / limit order: fetch current price → compare against `targetPrice`
+4. Wallet tracker: fetch recent txns from chain RPC → check for new buys since `lastChecked`
+5. DCA: compare `lastChecked` + `intervalHours` against now
+6. On trigger: execute action + update `status` / `triggeredAt` + notify user
+
+Errors on individual monitors are caught and logged — one failing monitor doesn't stop the others.
+
+---
+
+## User-Facing Tools
+
+| Tool | What it does |
+|------|-------------|
+| `set_price_alert` | Create a price alert monitor |
+| `set_limit_order` | Create a limit order monitor |
+| `set_wallet_tracker` | Create a wallet tracker monitor |
+| `set_dca` | Create a DCA schedule |
+| `list_monitors` | Show all active monitors with IDs |
+| `cancel_monitor` | Cancel by ID |
+
+Claude calls `list_monitors` first to get IDs before calling `cancel_monitor`.
+
+---
+
+## Sniper Settings (Related)
+
+Not a monitor, but related auto-buy filtering. Configured via `update_settings`:
+
+- `sniperMaxAgeSecs` — skip an alpha auto-buy if the token pair is older than N seconds (default 120). Protects against latecalling.
+- `sniperMaxPumpPct` — skip if the token already pumped more than N% in the last 5 minutes (default 50). Avoids buying the top.
+
+These apply to alpha caller auto-buys, not monitors.

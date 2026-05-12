@@ -1,0 +1,294 @@
+---
+title: Tools Reference
+---
+
+# Tools Reference
+
+32 tools total. Claude picks tools automatically based on user intent. Parameters marked **required** must always be supplied.
+
+Free users get all tools except the 7 premium-only ones. If a free user asks for a premium feature, Claude tells them and suggests `subscribe_premium`.
+
+---
+
+## Wallet & Balance
+
+### `check_balance`
+Get native balances (SOL, ETH) + stablecoin/token balances with USD values across all chains.
+No params. Returns `{ totalUsd, wallets[], tokens[], portfolioUsd }`.
+> Claude must only report what's in the response — never fabricate a balance.
+
+### `check_portfolio`
+Active token positions with current value, unrealized P&L, and trade history.
+No params.
+
+### `get_deposit_address`
+Return the user's deposit address for a chain.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+
+### `withdraw`
+Send SOL/ETH or any SPL/ERC-20 token to an external wallet. Server deducts gas from amount if balance is tight — pass full amount requested.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `chain` | `SOLANA \| BASE` | **required** |
+| `toAddress` | string | **required** destination wallet |
+| `amount` | number | **required** in human units (e.g. 0.5 SOL) |
+| `tokenAddress` | string | Omit for native SOL/ETH |
+
+> Claude must confirm address + amount before calling this.
+
+---
+
+## Trading
+
+### `buy_token`
+Buy a token by contract address. Amount is in USD; server converts to SOL/ETH automatically.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `amountUsd` | number | Default: user's setting. Min $2 |
+| `slippageBps` | number | e.g. 1500 = 15%. Default: user's setting |
+
+### `sell_token`
+Sell a token by percentage of holdings.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `percentage` | number | 1-100. Use 100 to sell all |
+
+### `swap_tokens`
+Swap one token for another (token-to-token or token-to-native).
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `fromToken` | string | **required**. Use `"native"` for SOL/ETH |
+| `toToken` | string | **required**. Use `"native"` for SOL/ETH |
+| `chain` | `SOLANA \| BASE` | **required** |
+| `amountIn` | string | Human-readable units |
+| `sellAll` | boolean | Sell entire `fromToken` balance |
+
+### `get_trade_history`
+Recent trades, optionally filtered by action.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `limit` | number | Default 10, max 50 |
+| `action` | `BUY \| SELL` | Omit for all |
+
+### `get_trading_stats`
+Total trades, win rate, total P&L, success rate. No params.
+
+---
+
+## Token Research
+
+### `search_token`
+Find a token by name/ticker when the user doesn't have a CA.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `query` | string | **required** e.g. "BONK", "WIF" |
+| `chain` | `SOLANA \| BASE` | Optional filter |
+
+### `get_token_info`
+Detailed token data: market cap, 24h volume, liquidity, price change %, pair age, socials.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+
+### `get_token_price`
+Current price of a token or native asset (SOL/ETH).
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | Omit for native SOL/ETH |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA. Use BASE for ETH |
+
+### `check_token_safety`
+Risk analysis: honeypot detection, liquidity, rug pull indicators. Returns 0-100 risk score.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+
+### `get_trending_tokens`
+Trending/boosted tokens from DEXScreener by volume and liquidity.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `chain` | `SOLANA \| BASE` | Omit for all chains |
+
+---
+
+## Settings
+
+### `get_settings`
+All current user settings (buy amounts, slippage, risk score, auto-sell config). No params.
+
+### `update_settings`
+Update any settings in one call. Only include fields the user explicitly mentioned.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `solUsdBuyAmount` | number | Default SOL buy in USD |
+| `baseUsdcBuyAmount` | number | Default Base buy in USD |
+| `maxSlippageBps` | number | 100–5000 |
+| `maxRiskScore` | number | 0–100 |
+| `minLiquidityUsd` | number | Default $5000 |
+| `dailyLimitUsd` | number | Daily spend cap |
+| `takeProfitPct` | number | Auto-sell on gain. Min 25. 0 = off |
+| `stopLossPct` | number | Auto-sell on drop. Min 10. 0 = off |
+| `sniperMaxAgeSecs` | number | Skip alpha buy if pair older than N secs. 0 = off |
+| `sniperMaxPumpPct` | number | Skip alpha buy if already pumped > N% in 5min. 0 = off |
+
+---
+
+## Trading Controls
+
+### `pause_trading`
+Pause all automatic trading (alpha auto-buys, auto-sell triggers). No params.
+
+### `resume_trading`
+Resume trading after pausing. No params.
+
+---
+
+## Alpha Callers
+
+### `manage_alpha_callers`
+Full CRUD for alpha callers — Telegram users whose CA posts trigger auto-buys.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `action` | string | **required**: `add \| remove \| list \| pause \| resume \| pause_all \| resume_all \| update` |
+| `callerUsername` | string | TG username without @. Required for add/remove/pause/resume/update |
+| `groupId` | string | TG group ID. Auto-detected from context if omitted on add |
+| `groupTitle` | string | Display name for reference |
+| `buyAmountUsd` | number | Per-caller override. 0 = revert to global |
+| `takeProfitPct` | number | Per-caller TP override. Min 25. 0 = global |
+| `stopLossPct` | number | Per-caller SL override. Min 10. 0 = global |
+
+---
+
+## Premium Subscription
+
+### `subscribe_premium`
+Pay $10/month in SOL or ETH from the user's wallet.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+
+### `check_premium_status`
+Current tier, expiry date, remaining days. No params.
+
+---
+
+## Monitors *(Premium only)*
+
+### `set_price_alert`
+Notify when a token crosses a price threshold.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `targetPrice` | number | **required** USD threshold |
+| `direction` | `above \| below` | **required** |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `description` | string | Optional label e.g. "BONK 2x alert" |
+
+### `set_limit_order`
+Auto buy or sell when a token hits a target price.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `targetPrice` | number | **required** |
+| `direction` | `above \| below` | **required** |
+| `action` | `buy \| sell` | **required** |
+| `amountUsd` | number | Required for buy |
+| `percentage` | number | 1-100 for sell. Default 100 |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `slippageBps` | number | Optional override |
+
+### `set_wallet_tracker`
+Watch an external wallet for activity. Optionally mirror buys.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `walletAddress` | string | **required** on-chain address |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `mirror` | boolean | Auto-mirror detected buys |
+| `mirrorAmountUsd` | number | Required if mirror is true |
+| `description` | string | Optional label |
+
+### `set_dca`
+Auto-buy a token on a fixed interval.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `tokenAddress` | string | **required** |
+| `amountUsd` | number | **required** per buy. Min $2 |
+| `intervalHours` | number | **required** between buys. Min 1 |
+| `chain` | `SOLANA \| BASE` | Default: SOLANA |
+| `maxBuys` | number | Stop after N buys. Omit for indefinite |
+
+### `list_monitors`
+All active monitors (alerts, limit orders, trackers, DCAs). No params.
+
+### `cancel_monitor`
+Cancel a monitor by ID (get ID from `list_monitors`).
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `monitorId` | string | **required** |
+
+---
+
+## Scheduled Actions *(Premium only)*
+
+### `schedule_action`
+Queue any tool to execute at a future time.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `action` | string | **required** tool name e.g. `"buy_token"` |
+| `params` | object | **required** same params as the target tool |
+| `executeAt` | string | **required** ISO 8601 e.g. `"2025-06-01T09:00:00Z"` |
+| `description` | string | **required** human-readable label shown in confirmation |
+
+---
+
+## Account Management
+
+### `setup_wallets`
+Create Solana + Base wallets for a brand new user. Only call after confirming they're new (not recovering). No params.
+
+### `link_email`
+Link an email for account recovery. Two-step: call once to send code, again with code to verify.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `email` | string | **required** |
+| `code` | string | Omit on first call; include on second |
+
+### `get_linked_email`
+Show what email is currently linked. No params.
+
+### `recover_account`
+Recover an existing account via linked email. Same two-step flow as `link_email`.
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `email` | string | **required** |
+| `code` | string | Omit on first call; include on second |

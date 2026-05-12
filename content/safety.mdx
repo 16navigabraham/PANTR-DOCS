@@ -114,6 +114,26 @@ Exemptions:
 
 This is important because Pantr accounts are created via Telegram (no traditional auth flow), so API endpoints need protection against unauthorized direct access.
 
+## Admin Route Protection
+
+`/api/admin/*` requires `Authorization: Bearer <ADMIN_SECRET>` on every request.
+
+Compared using `crypto.timingSafeEqual` — constant-time comparison prevents timing attacks where an attacker could measure response time to brute-force the secret character by character.
+
+Admin routes also have their own rate limiter: **10 requests/min per IP** (`authLimiter`). After that, 429 is returned. This makes brute-forcing the admin password impractical even without the constant-time guard.
+
+## Analytics Endpoint Hardening
+
+`/api/analytics/public` and `/api/analytics/chart` are public (no auth). Protected by:
+
+- **Per-IP rate limiter**: 30 req/min. In-memory `Map` — resets on server restart (intentional, low risk)
+- **Cache stampede protection**: `withCache()` uses a `_pending` promise map. On cache miss, only the first concurrent request fires a DB query — all others wait on the same promise. Prevents thundering herd during cold cache.
+- **No user data**: all responses are aggregated aggregate metrics only — no wallets, no usernames, nothing identifiable.
+
+## `/health/jobs` Protection
+
+Returns internal job status (queue depths, scheduler state). Requires `Authorization: Bearer <ADMIN_SECRET>` — verified with `crypto.timingSafeEqual`. Not public.
+
 ## Auth
 
 Dual auth system:

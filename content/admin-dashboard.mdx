@@ -1,0 +1,112 @@
+---
+title: Admin Dashboard
+---
+
+# Admin Dashboard
+
+Private Next.js app at `admin.pantr.xyz`. Password-protected — only you can access it.
+
+Repo: `C:\Users\user\pantr-admin`
+
+---
+
+## Auth
+
+Single password stored in `ADMIN_SECRET` env var (never in the browser).
+
+Flow:
+1. You visit any page → `proxy.ts` checks for `admin_session` cookie
+2. No valid cookie → redirect to `/login`
+3. Enter password → POST `/api/auth` → server compares with `ADMIN_SECRET` → sets httpOnly cookie (24h)
+4. All subsequent requests pass the cookie check
+
+The `admin_session` cookie is `httpOnly` + `secure` + `sameSite=strict` — JS cannot read it.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `proxy.ts` | Next.js 16 proxy — redirects unauthenticated requests to `/login` |
+| `app/api/auth/route.ts` | POST: set cookie. DELETE: clear cookie (logout) |
+| `app/api/proxy/[...path]/route.ts` | Server-side proxy — attaches `Authorization: Bearer` to all pantr-server calls |
+| `app/login/page.tsx` | Login form |
+
+---
+
+## API Proxy
+
+All admin API calls go through `/api/proxy/[...path]` — a Next.js server route that:
+
+1. Checks the `admin_session` cookie
+2. Attaches `Authorization: Bearer <ADMIN_SECRET>` header
+3. Forwards to `https://api.pantr.xyz/api/admin/...`
+
+The `ADMIN_SECRET` never leaves the server. The browser only ever talks to `/api/proxy/*`.
+
+---
+
+## Pages
+
+### Overview (`/`)
+Platform-wide stats with a time range switcher (24h / 7d / 30d):
+- Total volume, trade count, unique traders
+- Revenue (2% fee estimate)
+- Three charts: volume over time, trades over time, new signups
+
+### Users (`/users`)
+- Active premium subscribers (sorted by expiry)
+- Recent signups (last 20)
+
+### User Profile (`/users/[id]`)
+Full detail for one user:
+- Wallet addresses (Solana + Base)
+- Premium status + expiry
+- Trading stats (total trades, win rate, P&L)
+- Full trade history table
+- Settings snapshot
+
+### Traders (`/traders`)
+Leaderboard — top 20 traders by realized P&L.
+
+### Tokens (`/tokens`)
+Most-traded tokens. Two tabs: by volume (USD) and by trade count.
+
+---
+
+## Cmd+K User Search
+
+Press `Cmd+K` (or `Ctrl+K`) anywhere in the dashboard to open the search modal.
+
+- Debounced input — searches by Telegram username or ID
+- Results list with username + premium badge
+- Click a result → fetches full user → shows `UserQuickCard` inline (balance, stats, premium status)
+- Click through to full profile
+
+Components: `components/users/user-search.tsx`, `components/users/user-quick-card.tsx`
+
+---
+
+## Env Vars
+
+| Var | Value |
+|-----|-------|
+| `ADMIN_SECRET` | Same secret as `ADMIN_SECRET` on pantr-server |
+| `PANTR_API_URL` | `https://api.pantr.xyz` |
+
+---
+
+## Deployment
+
+Deployed to Vercel. `vercel.json`:
+
+```json
+{
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "installCommand": "npm install"
+}
+```
+
+Set both env vars in the Vercel dashboard under Project → Settings → Environment Variables.
+Custom domain: `admin.pantr.xyz` → add CNAME in Cloudflare pointing to Vercel.

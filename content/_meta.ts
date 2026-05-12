@@ -7,15 +7,18 @@ export default {
   'architecture': 'Architecture',
   'tech-stack': 'Tech Stack',
   'setup': 'Setup & Deployment',
+  'env-vars': 'Environment Variables',
   '-- Core Systems': {
     type: 'separator',
     title: 'Core Systems',
   },
   'claude-integration': 'Claude Integration',
+  'tools': 'Tools Reference',
   'trading': 'Trading Engine',
   'wallets': 'Wallets',
   'background-jobs': 'Background Jobs',
   'deposit-notifications': 'Deposit Notifications',
+  'error-handling': 'Error Handling',
   '-- Features': {
     type: 'separator',
     title: 'Features',
@@ -23,7 +26,14 @@ export default {
   'premium': 'Premium Model',
   'alpha-callers': 'Alpha Callers',
   'auto-sell': 'Auto-Sell',
+  'monitors': 'Monitors System',
   'account-recovery': 'Account Recovery',
+  '-- Dashboards': {
+    type: 'separator',
+    title: 'Dashboards',
+  },
+  'analytics': 'Public Analytics',
+  'admin-dashboard': 'Admin Dashboard',
   '-- Security & Infra': {
     type: 'separator',
     title: 'Security & Infra',
@@ -31,5 +41,4 @@ export default {
   'safety': 'Safety & Security',
   'database': 'Database',
   'ci-cd': 'CI/CD Pipeline',
-  'analytics': 'Public Analytics',
 }
