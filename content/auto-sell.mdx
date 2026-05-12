@@ -15,8 +15,10 @@ Claude calls `set_auto_sell(enabled=true, takeProfitPct=100, stopLossPct=50)`
 Settings stored in `UserSettings`:
 
 - `autoSellEnabled`: boolean
-- `takeProfitPct`: percentage (min 25%)
-- `stopLossPct`: percentage (min 10%)
+- `takeProfitPct`: percentage (min 25%) — global default
+- `stopLossPct`: percentage (min 10%) — global default
+
+Per-caller overrides can also be set on individual `AlphaGroup` entries. See [Alpha Callers](/alpha-callers).
 
 ### Minimums
 
@@ -28,18 +30,35 @@ Settings stored in `UserSettings`:
 Background job runs every 5 seconds (`src/services/auto-sell.js`):
 
 ```
-1. Fetch all premium users with autoSellEnabled=true
+1. Fetch all premium users with autoSellEnabled=true OR per-caller TP/SL set
 2. For each user:
    a. Get all confirmed BUY trades (open positions)
-   b. For each position:
+   b. Batch-fetch AlphaGroup records for any alphaGroupId present on trades
+   c. For each position:
+      - Resolve effective TP/SL: callerOverride ?? globalSetting
+      - Skip if neither is set for this holding
       - Use FIFO cost basis (proportional, not cumulative all-time spend)
       - Get current price (batched, 15s cache)
       - Calculate unrealized P&L %
-      - TP: if P&L >= takeProfitPct → SELL (exact threshold)
-      - SL: if P&L <= -(stopLossPct - slippageBuffer) → SELL (pre-trigger)
-   c. Execute sell via orchestrator (uses on-chain balance for exact amount)
-   d. Notify user in Telegram DM
+      - TP: if P&L >= effectiveTpPct → SELL (exact threshold)
+      - SL: if P&L <= -(effectiveSlPct - slippageBuffer) → SELL (pre-trigger)
+   d. Execute sell via orchestrator (uses on-chain balance for exact amount)
+   e. Notify user in Telegram DM
 ```
+
+## Per-Caller TP/SL Override
+
+Each holding tracks the `alphaGroupId` of the caller whose call triggered the buy. At sell-check time, the job resolves:
+
+```js
+effectiveTpPct = alphaGroup?.takeProfitPct ?? settings.takeProfitPct
+effectiveSlPct = alphaGroup?.stopLossPct   ?? settings.stopLossPct
+```
+
+This means:
+- Positions from @degenwhale (TP 200%, SL 40%) fire at those thresholds
+- Manually bought positions use global settings
+- A user with no global TP/SL but per-caller overrides still gets auto-sell on those holdings
 
 ## Slippage-Aware Stop-Loss
 

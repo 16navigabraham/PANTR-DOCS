@@ -1,0 +1,71 @@
+---
+title: Public Analytics
+---
+
+# Public Analytics
+
+Aggregate platform metrics available publicly at [analytics.pantr.xyz](https://analytics.pantr.xyz). No auth required. No user-identifiable data exposed.
+
+## Endpoints
+
+### `GET /api/analytics/public`
+
+Aggregate stats. Cached 60 seconds.
+
+```json
+{
+  "totalVolumeUsd": 184320.50,
+  "volume24hUsd": 4210.00,
+  "volume7dUsd": 28750.00,
+  "totalTrades": 3842,
+  "trades24h": 87,
+  "trades7d": 610,
+  "uniqueTraders": 214,
+  "avgTradeSizeUsd": 47.97,
+  "chains": [
+    { "chain": "SOLANA", "volumeUsd": 142000.00, "trades": 2910 },
+    { "chain": "BASE",   "volumeUsd": 42320.50,  "trades": 932 }
+  ],
+  "generatedAt": "2026-05-12T14:00:00.000Z"
+}
+```
+
+Only `CONFIRMED` `BUY` trades with a non-null `amountInUsd` are counted.
+
+### `GET /api/analytics/chart`
+
+30-day daily time series. Cached 5 minutes.
+
+```json
+{
+  "days": [
+    { "date": "2026-04-12", "volumeUsd": 5120.00, "trades": 108 },
+    { "date": "2026-04-13", "volumeUsd": 6340.50, "trades": 134 }
+  ],
+  "generatedAt": "2026-05-12T14:00:00.000Z"
+}
+```
+
+Powered by a `DATE_TRUNC('day', created_at)` Postgres group-by over the last 30 days.
+
+## Dashboard
+
+`pantr-analytics/` — standalone static site (plain HTML + Chart.js). Deployed separately to analytics.pantr.xyz.
+
+Charts:
+- **Volume line** — 30-day USD volume (blue)
+- **Trades bar** — 30-day trade count (neutral)
+- **Chain donut** — Solana vs Base split by volume
+
+## Caching
+
+In-memory cache with TTL — no Redis dependency for this route.
+
+| Endpoint | TTL |
+|----------|-----|
+| `/public` | 60s |
+| `/chart` | 5 min |
+
+## CORS
+
+The analytics routes are exempt from the origin block and accept requests from any origin so the public dashboard can fetch freely.

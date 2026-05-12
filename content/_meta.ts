@@ -31,4 +31,5 @@ export default {
   'safety': 'Safety & Security',
   'database': 'Database',
   'ci-cd': 'CI/CD Pipeline',
+  'analytics': 'Public Analytics',
 }

@@ -11,11 +11,13 @@ The `TradeOrchestrator` (`src/services/trade-orchestrator.js`) is the central tr
 Before executing ANY buy, sell, swap, or withdrawal, Claude must:
 
 1. Call `check_balance` to get the user's current balance
-2. Calculate the 2% platform fee from the trade amount
-3. Estimate gas cost (Solana ~0.000005 SOL, Base ~$0.01-0.05 in ETH)
+2. Estimate gas cost (Solana ~0.000005 SOL, Base ~$0.01-0.05 in ETH)
+3. For sells: calculate 2% close fee from the expected output
 4. Present a summary and wait for user confirmation before calling the trade tool
 
-Example: "Buying $30 of BONK: $0.60 platform fee + ~$0.01 gas. You'll spend ~$30.61 total. Confirm?"
+Examples:
+- Buy: "Buying $30 of BONK + ~$0.01 gas. Confirm?"
+- Sell: "Selling 1.5M BONK (~$44). After 2% fee ($0.88), you'll receive ~$43.12. Confirm?"
 
 Exceptions (no confirmation needed): auto-sell triggers, alpha auto-buys, and info queries.
 
@@ -25,7 +27,7 @@ Exceptions (no confirmation needed): auto-sell triggers, alpha auto-buys, and in
 User: "buy $10 of DezXAZ..."
          |
          v
-   Claude: check_balance → calculate fee + gas → show summary
+   Claude: check_balance → estimate gas → show summary (no platform fee on entry)
          |
          v
    User confirms → Tool Executor → orchestrator.buyToken()
@@ -37,7 +39,7 @@ User: "buy $10 of DezXAZ..."
    4. Route to chain-specific swap:
       - Solana → Jupiter V4 API
       - Base → Odos → KyberSwap → Uniswap V3 → Uniswap V4
-   5. Deduct platform fee → transfer to treasury
+   5. Full amount swapped — no fee deducted on buy
    6. On success: mark CONFIRMED, store txHash + amounts
    7. On failure: mark FAILED, store error
    8. Notify user via Telegram
@@ -106,12 +108,15 @@ Each aggregator:
 
 ## Fees
 
-All users pay a flat **2% trade fee** (200 bps) on every trade — buy, sell, or swap. No fee difference between free and premium tiers.
+| Event | Fee |
+|-------|-----|
+| Buy (manual or alpha auto-buy) | **0%** — no platform fee on entry |
+| Close (manual sell, TP trigger, SL trigger) | **2%** taken from native token received (SOL or ETH) |
 
-Fee is deducted from the input amount before the swap:
+Fee is taken from the output amount after the swap:
 
-- User buys $10 → $0.20 fee → $9.80 swapped
-- Fee transferred to treasury wallet after swap confirms
+- User sells tokens → receives 1.0 SOL → 0.02 SOL fee → user gets 0.98 SOL
+- Fee transferred to treasury wallet in the same transaction
 
 Fee collection: `src/services/fee-collector.js`
 

@@ -13,7 +13,7 @@ Alpha callers are users in Telegram groups whose contract address (CA) messages 
 3. **Detection**: Bot monitors group messages. When a tracked caller posts a CA:
    - Parse CA from message (`ca-parser.js`)
    - Look up all subscribers for that caller in that group
-   - Execute buy for each subscriber
+   - Execute buy for each subscriber using their per-caller buy amount (or global default)
 4. **Notification**: Subscriber gets a DM: "Auto-bought [token] from @cryptoguru's call"
 
 ## Message Flow
@@ -29,21 +29,42 @@ Alpha callers are users in Telegram groups whose contract address (CA) messages 
      1. Check daily limit (free: 1/day, premium: unlimited)
      2. Dedup check (Redis key: alpha:seen:{groupId}:{msgId})
      3. Run safety check on token
-     4. Execute buy via orchestrator
-     5. DM subscriber with result
+     4. Resolve buy amount: callerOverride ?? globalSetting
+     5. Execute buy via orchestrator (stores alphaGroupId on trade)
+     6. DM subscriber with result
 ```
 
 ## Managing Callers
 
-Via the `manage_alpha_callers` tool:
+Via the `manage_alpha_callers` tool (Claude handles this conversationally):
 
 | Action | Description |
 |--------|-------------|
-| `add` | Subscribe to a caller's CAs in a group |
+| `add` | Subscribe to a caller — optionally set per-caller buy amount, TP, SL |
+| `update` | Change strategy for an existing caller |
 | `remove` | Unsubscribe from a caller |
-| `list` | Show all tracked callers |
+| `list` | Show all tracked callers with their strategy |
 | `pause` | Temporarily stop a caller's auto-buys |
 | `resume` | Re-enable a paused caller |
+| `pause_all` | Pause every active caller at once |
+| `resume_all` | Resume every paused caller at once |
+
+## Per-Caller Strategy
+
+Each `AlphaGroup` entry can have its own trading strategy independent of the user's global settings:
+
+| Field | Description |
+|-------|-------------|
+| `buyAmountUsd` | Override buy amount for this caller. Falls back to global `solUsdBuyAmount` / `baseUsdcBuyAmount` |
+| `takeProfitPct` | Override take-profit for positions opened from this caller's calls |
+| `stopLossPct` | Override stop-loss for positions opened from this caller's calls |
+
+A single natural-language message configures everything:
+> *"add @degenwhale from Solana Gems group, buy $25, take profit at 200%, stop loss at 40%"*
+
+Claude chains `manage_alpha_callers(action='add', ...)` with all three fields in one call.
+
+The `alphaGroupId` is stored on each `Trade` record so auto-sell knows which caller's TP/SL to apply to that holding.
 
 ## Daily Limits
 
@@ -68,13 +89,19 @@ Public queries (token price, safety, trending) are answered directly in the grou
 
 ```prisma
 model AlphaGroup {
-  id              String  @id @default(uuid())
+  id              String   @id @default(uuid())
   userId          String
   groupId         String   // Telegram group ID
   groupTitle      String?
   callerUsername  String   // Without @
   callerId        String?  // Telegram user ID
-  isActive        Boolean @default(true)
-  tradesExecuted  Int     @default(0)
+  isActive        Boolean  @default(true)
+  tradesExecuted  Int      @default(0)
+  // Per-caller strategy overrides
+  buyAmountUsd    Decimal? @db.Decimal(18, 6)
+  takeProfitPct   Decimal? @db.Decimal(5, 2)
+  stopLossPct     Decimal? @db.Decimal(5, 2)
 }
 ```
+
+Trade records include `alphaGroupId` (String?) to link auto-buy trades back to their caller.
