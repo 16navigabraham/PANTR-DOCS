@@ -39,6 +39,7 @@ export default {
     title: 'Security & Infra',
   },
   'safety': 'Safety & Security',
+  'agent-identity': 'Agent Identity (ERC-8004)',
   'database': 'Database',
   'ci-cd': 'CI/CD Pipeline',
 }

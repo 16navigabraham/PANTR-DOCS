@@ -1,0 +1,84 @@
+---
+title: Agent Identity (ERC-8004)
+---
+
+# Agent Identity (ERC-8004)
+
+Pantr is registered as an on-chain AI agent under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), a standard for verifiable AI agent identity on EVM chains.
+
+## What Is ERC-8004?
+
+ERC-8004 is an ERC-721-based identity registry that lets AI agents publish a verifiable on-chain profile — who they are, what they do, and how to interact with them. Metadata is stored on IPFS and anchored to the registry contract.
+
+The registry is deployed at the same address on all supported chains:
+```
+0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+```
+
+## Pantr's Registrations
+
+| Chain | Agent ID | Registry Entry |
+|-------|----------|----------------|
+| Base (chainId 8453) | `50984` | [8004scan.io](https://www.8004scan.io/agents/base/50984) |
+| Mantle (chainId 5000) | `93` | [8004scan.io](https://www.8004scan.io/agents/mantle/93) |
+
+## On-Chain Metadata
+
+The agent metadata is stored permanently on IPFS:
+
+```
+ipfs://bafkreiaue5nfiv6ycp66u3adzycanx4gpomazq7dilz2ns6tpeto65botq
+```
+
+```json
+{
+  "name": "Pantr",
+  "description": "AI-powered degen trading assistant on Telegram...",
+  "image": "https://docs.pantr.xyz/icon.jpg",
+  "services": [{
+    "name": "Telegram Trading Bot",
+    "endpoint": "https://t.me/PantrAgent_bot",
+    "skills": [
+      "trading/token-buy-sell",
+      "trading/alpha-detection",
+      "trading/portfolio-management",
+      "trading/token-safety-analysis",
+      "trading/wallet-monitoring"
+    ],
+    "domains": ["defi", "trading", "crypto", "telegram-bot"]
+  }],
+  "links": [
+    { "label": "X / Twitter", "url": "https://x.com/pantrbot" },
+    { "label": "Telegram Bot", "url": "https://t.me/PantrAgent_bot" }
+  ],
+  "active": true,
+  "registrations": [
+    { "agentId": "50984", "agentRegistry": "eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" },
+    { "agentId": "93",    "agentRegistry": "eip155:5000:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" }
+  ]
+}
+```
+
+## Registration Transactions
+
+| Chain | Transaction |
+|-------|-------------|
+| Base `register()` | [basescan.org](https://basescan.org/tx/0xf701a843e213c7cda5a8399c108450a7d29e1c7cc4e7eefdfb9df7532977dd19) |
+| Mantle `register()` | [explorer.mantle.xyz](https://explorer.mantle.xyz/tx/0x5f39d3445994d3a6a3ac4c2cef4425db8138282361da36c5c0ef99a5f862906c) |
+
+## What It Gives Pantr
+
+- **Verifiable identity** — anyone can confirm Pantr is a legitimate registered AI agent owned by a specific wallet
+- **Discoverability** — listed on [8004scan.io](https://www.8004scan.io) alongside other agents in the ecosystem
+- **Permanent record** — metadata on IPFS cannot be altered; URI updates via `setAgentURI` create an auditable history on-chain
+- **Ecosystem readiness** — as agent marketplaces, reputation systems, and agent-to-agent coordination protocols emerge around ERC-8004, Pantr is already registered and can plug in
+
+## Updating the Metadata
+
+If Pantr's details change (new skills, new endpoint, version bump), run:
+
+```bash
+node scripts/update-agent-uri.js
+```
+
+This re-uploads the metadata to IPFS and calls `setAgentURI` on both Base and Mantle. Requires `MANTLE_AGENT_KEY` and `PINATA_JWT` in `.env`.
