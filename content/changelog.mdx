@@ -1,0 +1,48 @@
+---
+title: Changelog
+---
+
+# Changelog
+
+## v0.2.0 — MTProto Alpha Tracking
+*2026-05-17*
+
+### Added
+- **MTProto per-user alpha tracking** — users connect their own Telegram account via `/trackalpha`; Pantr reads targeted groups through their session using gramjs (push-based, no polling)
+- `UserTelegramSession` model — stores gramjs `StringSession` per user
+- `sendCode` / `confirmCode` flow with retryable OTP handling
+- `startAll()` boots all user listeners at server start in batches of 5
+- `refreshSubscriptions()` rebinds event handlers after caller add/remove
+- Public and private supergroup support (`@handle` or `t.me/+hash`)
+- MD5 dedup per `userId:callerUsername:messageHash` (replaces weak base64 slice)
+- `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` env vars
+
+### Changed
+- `manage_alpha_callers` now requires `groupUsername` instead of `groupId`
+- `AlphaGroup` unique key changed to `[userId, callerUsername, groupUsername]`
+- `/connecttg` renamed to `/trackalpha` with clearer onboarding message
+
+### Removed
+- Old bot-in-group alpha tracking (`handleGroupMessage`, `PRIVATE_TOOLS` set)
+- `alpha:group_ctx` Redis key (dead — no longer read anywhere)
+- `SEEN_MSG_KEY` constant
+
+### Fixed
+- Withdrawal tx hash bug — `confirmTransaction` timeout no longer causes tool executor to return FAILED and Claude to fabricate a hash; real hash is returned regardless of confirmation timeout
+- gramjs `baseLogger` crash (`this._log.info is not a function`) — replaced with `logLevel: 'none'`
+- Internal error messages no longer exposed raw to users — generic fallback shown instead
+- Duplicate event handler accumulation — `_removeAllHandlers()` runs before every `_attachListeners` call
+
+---
+
+## v0.1.0 — Stable Baseline
+*2026-05-17*
+
+Initial tagged baseline before MTProto work. Core trading engine live:
+- Claude AI message routing with full tool system
+- Solana (Jupiter) + Base (Odos/KyberSwap/Uniswap) trading
+- Privy-managed wallets (TEE, no raw keys)
+- Auto-sell (take-profit / stop-loss, premium)
+- Background jobs: price monitor, sniper window, deposit watcher
+- Admin dashboard + analytics
+- Premium subscription system (2% trade fee revenue model)

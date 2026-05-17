@@ -4,34 +4,70 @@ title: Alpha Callers
 
 # Alpha Callers
 
-Alpha callers are users in Telegram groups whose contract address (CA) messages trigger automatic buys for subscribers.
+Alpha callers are Telegram users whose contract address (CA) posts trigger automatic buys for subscribers. Pantr reads their messages through the subscriber's own Telegram account via MTProto — no bot needs to be added to any group.
 
 ## How It Works
 
-1. **Setup**: User adds bot to a TG group, then tags it: `@PantrAgent_bot add alpha @cryptoguru`
-2. **Storage**: `AlphaGroup` record in DB linking subscriber → group → caller
-3. **Detection**: Bot monitors group messages. When a tracked caller posts a CA:
-   - Parse CA from message (`ca-parser.js`)
-   - Look up all subscribers for that caller in that group
-   - Execute buy for each subscriber using their per-caller buy amount (or global default)
-4. **Notification**: Subscriber gets a DM: "Auto-bought [token] from @cryptoguru's call"
+1. **Connect account** — user runs `/trackalpha`, enters their phone number and OTP
+2. **Add callers** — tell Claude which caller to watch in which group
+3. **Pantr listens** — a persistent MTProto connection reads messages from those groups through the user's own account
+4. **Auto-buy fires** — when a tracked caller posts a CA, Pantr executes a buy and DMs the user
 
-## Message Flow
+This approach mirrors how X (Twitter) alpha tracking works: Pantr reads through the user's profile rather than needing elevated group permissions.
+
+## Why MTProto, Not Bot-in-Group
+
+| Approach | Problem |
+|----------|---------|
+| Add bot to group | Most alpha group admins block bots |
+| Bot polls | No push — latency, rate limits |
+| MTProto (user session) | Push-based TCP — instant delivery, no admin permissions needed |
+
+Telegram pushes new messages to the connected client in real time. There is no polling.
+
+## Supported Group Types
+
+| Type | Supported | Notes |
+|------|-----------|-------|
+| Public supergroup | ✅ | Identify by `@handle` |
+| Private supergroup | ✅ | Identify by `t.me/+inviteHash` |
+| Broadcast channel | ⚠️ | Known gramjs bug — unreliable, avoid |
+| Legacy group | ✅ | Rare; works the same way |
+
+## Setup Flow
 
 ```
-@cryptoguru posts "DezXAZ8z7... 🚀" in group
-         |
-         v
-   alpha.js detects CA from tracked caller
-         |
-         v
-   For each subscriber:
-     1. Check daily limit (free: 1/day, premium: unlimited)
-     2. Dedup check (Redis key: alpha:seen:{groupId}:{msgId})
-     3. Run safety check on token
-     4. Resolve buy amount: callerOverride ?? globalSetting
-     5. Execute buy via orchestrator (stores alphaGroupId on trade)
-     6. DM subscriber with result
+User: /trackalpha
+Bot:  → Explains what connecting does, asks for phone number
+
+User: +2348012345678
+Bot:  → sendCode() fires, Telegram sends OTP to user's app
+
+User: 12345  (OTP)
+Bot:  → confirmCode() signs in, saves StringSession to DB
+      → startListening() fires, subscribes to tracked groups
+
+User: "watch @degenwhale in @solanagems"
+Claude: → manage_alpha_callers(action='add', callerUsername='degenwhale', groupUsername='@solanagems')
+```
+
+## Message Detection Flow
+
+```
+@degenwhale posts "DezXAZ8z7... 🔥" in @solanagems
+        |
+        v
+  MTProto NewMessage event fires on user's client
+        |
+        v
+  handleMtprotoMessage():
+    1. MD5 dedup check (per userId:callerUsername:hash)
+    2. Check user.isPaused AND settings.alphaPaused
+    3. Sniper window check
+    4. Parse CA from message text
+    5. Safety check on token
+    6. Execute buy via orchestrator
+    7. DM user with result
 ```
 
 ## Managing Callers
@@ -40,7 +76,7 @@ Via the `manage_alpha_callers` tool (Claude handles this conversationally):
 
 | Action | Description |
 |--------|-------------|
-| `add` | Subscribe to a caller — optionally set per-caller buy amount, TP, SL |
+| `add` | Subscribe to a caller in a specific group |
 | `update` | Change strategy for an existing caller |
 | `remove` | Unsubscribe from a caller |
 | `list` | Show all tracked callers with their strategy |
@@ -49,22 +85,56 @@ Via the `manage_alpha_callers` tool (Claude handles this conversationally):
 | `pause_all` | Pause every active caller at once |
 | `resume_all` | Resume every paused caller at once |
 
+**`add` requires both `callerUsername` and `groupUsername`.** The user must have connected their TG account first via `/trackalpha` — if no session exists, Claude tells them to run it.
+
 ## Per-Caller Strategy
 
-Each `AlphaGroup` entry can have its own trading strategy independent of the user's global settings:
+Each `AlphaGroup` entry can have its own trading strategy independent of global settings:
 
 | Field | Description |
 |-------|-------------|
-| `buyAmountUsd` | Override buy amount for this caller. Falls back to global `solUsdBuyAmount` / `baseUsdcBuyAmount` |
-| `takeProfitPct` | Override take-profit for positions opened from this caller's calls |
-| `stopLossPct` | Override stop-loss for positions opened from this caller's calls |
+| `buyAmountUsd` | Override buy amount for this caller. Falls back to global setting |
+| `takeProfitPct` | Override take-profit for positions from this caller's calls |
+| `stopLossPct` | Override stop-loss for positions from this caller's calls |
 
-A single natural-language message configures everything:
-> *"add @degenwhale from Solana Gems group, buy $25, take profit at 200%, stop loss at 40%"*
+Natural language configures everything in one message:
+> *"watch @degenwhale in @solanagems, buy $25, take profit at 200%, stop loss at 40%"*
 
-Claude chains `manage_alpha_callers(action='add', ...)` with all three fields in one call.
+Claude chains `manage_alpha_callers` with all fields in one call. The `alphaGroupId` is stored on each `Trade` record so auto-sell knows which caller's TP/SL to apply.
 
-The `alphaGroupId` is stored on each `Trade` record so auto-sell knows which caller's TP/SL to apply to that holding.
+## Session Management
+
+- One `TelegramClient` (gramjs) per user, held in memory
+- `StringSession` persisted in `user_telegram_sessions` table
+- On server restart, `startAll()` reconnects all users in batches of 5
+- `refreshSubscriptions()` rebinds event handlers after caller add/remove
+- 2FA accounts: user must temporarily disable 2FA — Pantr does not support 2FA sign-in
+
+## Database Models
+
+```prisma
+model AlphaGroup {
+  id             String   @id @default(uuid())
+  userId         String
+  groupUsername  String?  // @handle or t.me/+hash
+  groupTitle     String?
+  callerUsername String   // without @
+  isActive       Boolean  @default(true)
+  tradesExecuted Int      @default(0)
+  buyAmountUsd   Decimal? @db.Decimal(18, 6)
+  takeProfitPct  Decimal? @db.Decimal(5, 2)
+  stopLossPct    Decimal? @db.Decimal(5, 2)
+  @@unique([userId, callerUsername, groupUsername])
+}
+
+model UserTelegramSession {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  sessionString String
+  phone         String?
+  connectedAt   DateTime @default(now())
+}
+```
 
 ## Daily Limits
 
@@ -77,31 +147,10 @@ Tracked via Redis key: `alpha:buys:{userId}` with 24h TTL.
 
 ## Privacy
 
-When a user tags the bot in a group asking about balance, portfolio, or trading:
+When a user mentions the bot in a group asking about balance, portfolio, or trading:
 
 - Bot detects privacy-sensitive request
 - Responds in group: "Check your DMs!"
 - Processes the request in the user's DM
 
 Public queries (token price, safety, trending) are answered directly in the group.
-
-## Database Model
-
-```prisma
-model AlphaGroup {
-  id              String   @id @default(uuid())
-  userId          String
-  groupId         String   // Telegram group ID
-  groupTitle      String?
-  callerUsername  String   // Without @
-  callerId        String?  // Telegram user ID
-  isActive        Boolean  @default(true)
-  tradesExecuted  Int      @default(0)
-  // Per-caller strategy overrides
-  buyAmountUsd    Decimal? @db.Decimal(18, 6)
-  takeProfitPct   Decimal? @db.Decimal(5, 2)
-  stopLossPct     Decimal? @db.Decimal(5, 2)
-}
-```
-
-Trade records include `alphaGroupId` (String?) to link auto-buy trades back to their caller.
