@@ -38,14 +38,14 @@ Telegram pushes new messages to the connected client in real time. There is no p
 
 ```
 User: /trackalpha
-Bot:  → Explains what connecting does, asks for phone number
+Bot:  → initiateDeepLinkAuth() calls auth.ExportLoginToken
+      → Sends inline button: "Connect for Alpha Tracking" (tg://login?token=...)
 
-User: +2348012345678
-Bot:  → sendCode() fires, Telegram sends OTP to user's app
-
-User: 12345  (OTP)
-Bot:  → confirmCode() signs in, saves StringSession to DB
-      → startListening() fires, subscribes to tracked groups
+User: taps button → Telegram shows native "Approve login?" dialog → taps Confirm
+Bot:  → UpdateLoginToken fires on server client
+      → _saveSession() saves StringSession to DB
+      → startListening() subscribes to tracked groups
+      → DMs user: "✅ Telegram account connected!"
 
 User: "watch @degenwhale in @solanagems"
 Claude: → manage_alpha_callers(action='add', callerUsername='degenwhale', groupUsername='@solanagems')
@@ -108,7 +108,7 @@ Claude chains `manage_alpha_callers` with all fields in one call. The `alphaGrou
 - `StringSession` persisted in `user_telegram_sessions` table
 - On server restart, `startAll()` reconnects all users in batches of 5
 - `refreshSubscriptions()` rebinds event handlers after caller add/remove
-- 2FA accounts: user must temporarily disable 2FA — Pantr does not support 2FA sign-in
+- 2FA accounts: fully supported — Telegram's native confirmation dialog handles 2FA on the user's device, Pantr never sees the password
 
 ## Database Models
 
