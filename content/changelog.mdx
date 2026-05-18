@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## v0.3.0 — Threat Detection + Stability
+*2026-05-18*
+
+### Added
+- **Threat monitor** — fires alerts via the error notifier on: new MTProto sessions, large withdrawals (>$200), trade volume spikes (5× 7-day avg), repeated failed auth (5 in 1h), prompt injection patterns in messages
+- `eslint-plugin-n` with `n/no-missing-require` — catches bad `require()` paths at lint time
+- `prisma migrate deploy` in start command — migrations apply automatically on every deploy
+- `DIRECT_DATABASE_URL` support for Neon pooler/direct connection split
+
+### Fixed
+- `NewMessage({ chats: resolvedChats })` crash — gramjs choked on entity objects passed as chat filters; switched to `NewMessage({})` and filter by entity ID in handler
+- `group_id` NOT NULL constraint blocking alpha caller creation — migration makes it nullable (MTProto mode uses `group_username` instead)
+- Bad `require('../services/mtproto-manager')` path in `tool-executor.js` — corrected to `../mtproto-manager`
+- Tool DB errors no longer leak raw Prisma stack traces to Claude — wrapped in try/catch with clean error message
+
+### Changed
+- `/trackalpha` UX — explicit consent screen listing what Pantr can/cannot access, letter-prefix OTP instruction with reason, 2FA prompt explains the password is used once and never stored
+
+---
+
 ## v0.2.0 — MTProto Alpha Tracking
 *2026-05-17*
 
