@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## v0.4.0 — Pump.fun Graduated Token Routing + Rate Limit Fixes
+*2026-05-19*
+
+### Added
+- **PumpPortal fallback for graduated pump.fun tokens** — Jupiter returns `NO_ROUTES_FOUND` for ~5 minutes after a token graduates from the bonding curve to Pump.fun AMM. When Jupiter fails for a `couldBePump` token, `pumpfun-swap.js` is tried as a second attempt, routing directly via PumpSwap AMM without needing Jupiter indexing.
+
+### Fixed
+- **GeckoTerminal 429 rate limiting** — token price cache TTL increased from 60s to 120s; backoff after a 429 increased from 60s to 5 minutes. Halves GeckoTerminal call frequency under normal portfolio load.
+- **Log masking not covering arrays** — `entityIds` and `callers` fields in MTProto logs are now masked. Array values are each masked individually (e.g. `["386***764"]`) instead of the raw IDs leaking.
+
+### Changed
+- `MASK_KEYS` in `logger.js` extended with `entityIds`, `callers`, `senderUsername` to cover all MTProto tracking log fields
+
+---
+
 ## v0.3.0 — Threat Detection + Stability
 *2026-05-18*
 

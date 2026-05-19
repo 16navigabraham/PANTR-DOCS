@@ -80,13 +80,30 @@ User: "sell 50% of my BONK"
 
 ### Solana
 
-Single router: **Jupiter V4 API**
+Primary router: **Jupiter V4 API**
 
 ```
 getQuote() → buildSwapTransaction() → sign via Privy → sendTransaction() → confirm
 ```
 
-Special case: **Pump.fun** tokens (bonding curve) use `pumpfun-swap.js` directly.
+Pump.fun tokens follow a multi-stage routing cascade:
+
+```
+isPumpFunMint(address)?
+  YES → detectBondingCurve() →
+        active?  YES → pumpswap-direct.executeBuy()   (direct program call)
+                          ↓ fail
+                       pumpfun-swap.js via PumpPortal  (bonding curve fallback)
+                          ↓ fail
+                       Jupiter (last resort)
+        active?  NO  → Jupiter DEX
+                          ↓ NO_ROUTES_FOUND + couldBePump?
+                       pumpfun-swap.js via PumpPortal  (graduated token AMM, ~5 min Jupiter lag)
+  NO  → Jupiter DEX
+```
+
+- **Bonding curve tokens**: `pumpswap-direct.js` hits the Pump.fun program directly (no PumpPortal round-trip). Falls back to PumpPortal, then Jupiter.
+- **Graduated tokens** (post-bonding curve): Jupiter is tried first. If `NO_ROUTES_FOUND`, PumpPortal fallback routes via PumpSwap AMM directly — bypassing Jupiter's ~5 minute indexing lag after graduation.
 
 ### Base (EVM)
 

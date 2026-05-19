@@ -139,6 +139,16 @@ model UserTelegramSession {
 }
 ```
 
+## Log Messages
+
+| Message | Meaning |
+|---------|---------|
+| `MTProto: alpha message detected` | A tracked caller posted something; CA extraction starting |
+| `[ALPHA:MTPROTO] no CA in message` | Caller posted but no contract address was found (image, text, meme) — expected noise, not an error |
+| `MTProto: tracking callers` | Informational — lists which callers are being watched for a user at listener boot |
+
+The `no CA in message` log fires often for active callers who post non-trade content. It is not actionable.
+
 ## Daily Limits
 
 | Tier | Alpha Auto-buys/Day |
