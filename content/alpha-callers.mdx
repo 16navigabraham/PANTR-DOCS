@@ -31,7 +31,7 @@ Telegram pushes new messages to the connected client in real time. There is no p
 |------|-----------|-------|
 | Public supergroup | ✅ | Identify by `@handle` |
 | Private supergroup | ✅ | Identify by `t.me/+inviteHash` |
-| Broadcast channel | ⚠️ | Known gramjs bug — unreliable, avoid |
+| Broadcast channel | ✅ | Raw `UpdateNewChannelMessage` handler — `NewMessage` event misses these |
 | Legacy group | ✅ | Rare; works the same way |
 
 ## Setup Flow
