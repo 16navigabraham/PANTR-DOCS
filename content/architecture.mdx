@@ -59,7 +59,9 @@ src/
 │   ├── index.js
 │   └── handlers/
 │       ├── message-handler.js    # Private DMs
-│       └── alpha.js              # Groups + alpha callers
+│       ├── alpha.js              # Groups + alpha callers
+│       ├── commands.js           # /positions, /settings, /demo, etc.
+│       └── callbacks.js          # Inline keyboard callbacks
 ├── config/                       # Env var validation (Zod)
 ├── lib/                          # Prisma, Redis, Sentry, trade queue
 ├── middleware/                   # Auth, rate limiting, scanner shield
@@ -71,8 +73,15 @@ src/
 │   ├── wallet/                   # Privy operations
 │   ├── trade-orchestrator.js     # Main trading engine
 │   ├── auto-sell.js              # TP/SL monitoring
-│   └── price-oracle.js           # Multi-source pricing
-├── utils/                        # Logger, activity gate, safe interval
+│   ├── demo-service.js           # Demo mode — live prices, no on-chain execution
+│   ├── mtproto-manager.js        # Per-user gramjs sessions for alpha tracking
+│   ├── price-oracle.js           # Multi-source pricing + DexScreener pair cache
+│   └── threat-monitor.js         # Session, withdrawal, auth, injection alerts
+├── utils/
+│   ├── market-format.js          # fmtPrice, fmtNum, explorerLinks, pairSummary
+│   ├── logger.js                 # Structured logging with key masking
+│   ├── activity-gate.js          # Keeps Neon Postgres awake under load
+│   └── safe-interval.js          # Crash-resilient background job wrapper
 └── index.js                      # Server entry point
 ```
 

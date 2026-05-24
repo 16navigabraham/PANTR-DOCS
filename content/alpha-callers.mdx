@@ -56,22 +56,37 @@ Claude: → manage_alpha_callers(action='add', callerUsername='degenwhale', grou
 
 ## Message Detection Flow
 
+Pantr uses two complementary event handlers. `NewMessage` covers supergroups and legacy groups; `Raw` catches broadcast channels which `NewMessage` silently drops.
+
 ```
-@degenwhale posts "DezXAZ8z7... 🔥" in @solanagems
+Message posted in tracked group/channel
         |
-        v
-  MTProto NewMessage event fires on user's client
+        ├── Supergroup / legacy group
+        |         NewMessage event fires
+        |         → getSender() → match callerUsername or senderId
+        |         → entityIdToGroupKey lookup
+        |         → handleMtprotoMessage()
         |
-        v
-  handleMtprotoMessage():
-    1. MD5 dedup check (per userId:callerUsername:hash)
+        └── Broadcast channel
+                  Raw(UpdateNewChannelMessage) fires
+                  → peerId.channelId extracted
+                  → reverse-iterate callerEntityMap to find owner
+                  → handleMtprotoMessage()
+
+handleMtprotoMessage():
+    1. MD5 dedup check (per userId:callerUsername:hash) — skips re-processing same message text
     2. Check user.isPaused AND settings.alphaPaused
     3. Sniper window check
     4. Parse CA from message text
-    5. Safety check on token
-    6. Execute buy via orchestrator
-    7. DM user with result
+    5. Per-user+caller+CA dedup — skips re-buying same token if caller posts updates
+    6. Safety check on token
+    7. Execute buy via orchestrator (or simulateSell in demo mode)
+    8. DM user with rich card (symbol, MC, liq, price, tx hash, explorer links)
 ```
+
+**Key internal details:**
+- `callerEntityMap` is keyed by caller username (not entity ID). The Raw handler reverse-iterates the map to find which caller owns the incoming channel ID — direct key lookup by ID would always miss.
+- Both `NewMessage` and `Raw` handlers share an in-memory `_handledMsgIds` Set keyed by `chatEntityId:msgId` with a 5s TTL. This prevents the same message from being processed twice when both handlers fire for a broadcast channel post.
 
 ## Managing Callers
 
@@ -143,9 +158,11 @@ model UserTelegramSession {
 
 | Message | Meaning |
 |---------|---------|
-| `MTProto: alpha message detected` | A tracked caller posted something; CA extraction starting |
-| `[ALPHA:MTPROTO] no CA in message` | Caller posted but no contract address was found (image, text, meme) — expected noise, not an error |
-| `MTProto: tracking callers` | Informational — lists which callers are being watched for a user at listener boot |
+| `MTProto: alpha message detected` | Supergroup/legacy group message from tracked caller; CA extraction starting |
+| `MTProto: alpha channel message detected (raw)` | Broadcast channel message from tracked caller via Raw handler; CA extraction starting |
+| `[ALPHA:MTPROTO] no CA in message` | Caller posted but no contract address found (image, text, meme) — expected noise, not an error |
+| `MTProto: tracking callers` | Informational — lists callers being watched for a user at listener boot |
+| `MTProto: entity ID mismatch for tracked caller` | A tracked caller posted in a group they're not registered for — blocked correctly |
 
 The `no CA in message` log fires often for active callers who post non-trade content. It is not actionable.
 

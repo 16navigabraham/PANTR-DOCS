@@ -4,6 +4,52 @@ title: Changelog
 
 # Changelog
 
+## v0.6.0 — MTProto Regression Fix + Demo Sells + Rich Cards + Gas Fix
+*2026-05-24*
+
+### Fixed
+- **MTProto listener regression** — `_logId()` (log masking helper, formerly `_shortId`) was accidentally used inside Prisma `WHERE` clauses in `startListening`, `_saveSession`, `refreshSubscriptions`, and `revokeSession`. Masked IDs never matched DB records, so all user listeners silently failed to start after deploy. Renamed helper to `_logId` throughout to make log-only intent obvious; all Prisma queries now use raw `userId`.
+- **Double-buy on channel posts** — gramjs fires both `NewMessage` and `Raw(UpdateNewChannelMessage)` for the same broadcast channel message, causing two buys per CA. Fixed with `_dedupMsg(chatEntityId, msgId)` in `mtproto-manager.js` — an in-memory Set with 5s TTL that both handlers check before processing.
+- **Demo sells blocked** — `sell_token` in `tool-executor.js` returned an error in demo mode instead of executing. Implemented `demoService.simulateSell()` which aggregates net token position from prior demo trades, fetches live price, creates a SELL `DemoTrade`, and increments the demo balance. Demo sells now work end-to-end.
+- **ThreatMonitor Upstash API mismatch** — `redis.zAdd` / `redis.zRangeByScore` don't exist in the Upstash SDK. Fixed: `zadd` (lowercase), `member:` field instead of `value:`, `zrangebyscore` instead of `zRangeByScore`.
+- **EVM withdrawal gas mismatch** — `_withdrawEvm` calculated `adjustedAmount = balance - gasCost` using one `maxFeePerGas` value, then called `signer.sendTransaction()` without passing it — ethers re-fetched fee data at submit time, getting a higher price, causing the node's balance check to fail. Fix: lock `maxFeePerGas` at estimate time and pass the same value to `sendTransaction`. Gas buffer also increased from 20% → 30%.
+
+### Added
+- **Demo sell simulation** (`src/services/demo-service.js`) — `simulateSell({ userId, tokenAddress, chain, percentage })` computes net tokens held from trade history, prices via `priceOracle.getTokenPrice`, records a SELL demo trade, returns tx hash + amounts for realistic DM formatting.
+- **Rich position cards** (`/positions`) — both demo and live positions now show: token symbol/name, DEX · MC · Liq · Price line, tokens held, cost basis, current value, PnL with % and emoji, explorer links (DexScreener · Basescan/Solscan · BirdEye), CA. Data sourced from DexScreener via `fetchTokenPair`.
+- **Rich trade notifications** (`notifications.js`) — `sendTelegramTradeConfirmed` now fetches live DexScreener pair data and shows DEX, MC, liquidity, and price for both BUY and SELL confirms. `sendTelegramPositionSummary` (auto-sell triggers) enriched with PnL, MC, liq, and token links.
+- **Rich alpha buy DMs** (`alpha.js`) — demo buy DMs replaced bare text with full card: symbol/name, market summary, price, caller, spent→tokens, tx hash, explorer links.
+- **`src/utils/market-format.js`** — shared formatting helpers: `fmtPrice` (subscript zero compression for micro-cap prices), `fmtNum`/`fmtTokenAmt` (K/M/B suffixes), `shortAddr`, `explorerLinks`, `pairSummary`.
+- **`priceOracle.fetchTokenPair(address, chain)`** — DexScreener `/latest/dex/tokens/{address}` lookup filtered by chain slug, sorted by liquidity, with 60s mem-cache. Used by position cards and trade notifications.
+
+### Changed
+- **Demo UX language** — removed all "simulated trade" and "no real funds" phrasing from user-facing strings. Demo mode now reads: "live prices, no on-chain execution". The word "demo" is kept but the experience looks and feels like live trading.
+
+---
+
+## v0.5.0 — Trade Speed + Channel Alpha Fix + Stability
+*2026-05-20*
+
+### Fixed
+- **Broadcast channel alpha tracking** — Raw handler was doing `callerEntityMap.has(channelId)` but `callerEntityMap` is keyed by caller username, not entity ID. Fix: reverse-iterate the map to find which caller owns the channel. Channel messages now correctly trigger alpha buys.
+- **Jito enabled by default** — `JITO_ENABLED !== 'false'` defaulted ON when the env var was absent, adding ~2s DNS failure on every Solana buy. Changed to `=== 'true'` (opt-in).
+- **Pump.fun token routing** — graduated tokens went to Jupiter first (fails with `Custom:6001` after graduation); now routes PumpPortal first and falls back to Jupiter. Cuts pump token buy latency significantly.
+- **Sell using stale DB amount** — sell_token fell back to the DB buy record when the token wasn't in wallet, causing a Jupiter `Error 6024` swap attempt. Now returns an error immediately if on-chain balance is zero/missing.
+- **Solana withdrawal rent reserve** — withdrawing full SOL balance left account below rent-exempt minimum (~890,880 lamports), failing simulation. Now reserves `rent_exempt + gas` before computing the withdrawal amount.
+- **Double DM on failed alpha buy** — `notifications.js` sent both `⚠️ Alpha buy skipped` and `❌ Trade Failed` for the same event. Fixed: skip `sendTelegramTradeFailed` when `trade.alphaGroupId` is set.
+- **Claude 529 model fallback** — on Anthropic overload, bot now switches to the configured fallback model (`CLAUDE_FALLBACK_MODEL`) instead of failing. Different models run on separate capacity pools so the fallback is effective.
+- **Analytics volume counting** — analytics `/public` endpoint was counting BUY-only volume; corrected to count all confirmed trades (BUY + SELL) to match the admin dashboard definition.
+- **Fee revenue query** — admin fee revenue was excluding old sell trades due to `AND action = 'BUY'` in the SQL fallback. Removed the filter so sell-side 2% fees are counted.
+- **Group name partial match** — `findGroupByName` was exact-match only; "AbrahamNAVIG" failed to find "AbrahamNAVIG Channel". Added contains-match fallback.
+- **DM matched as group** — `findGroupByName` was scanning all dialogs including DMs; restricted to `isGroup || isChannel` only.
+- **Claude code fences in replies** — system prompt Response Formats used ``` blocks, causing Telegram to show a copy button on every reply. Removed all code fences from format templates.
+
+### Added
+- **Minimum balance guidance** — Claude now informs users they need at least $3 in their wallet to execute a trade (covers trade amount + 2% fee + gas).
+- `CLAUDE_FALLBACK_MODEL` env var — configure which model to switch to on 529 overload. Recommended: `claude-sonnet-4-6` when primary is haiku.
+
+---
+
 ## v0.4.0 — Pump.fun Graduated Token Routing + Rate Limit Fixes
 *2026-05-19*
 
