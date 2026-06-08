@@ -19,16 +19,21 @@ Wallets are created **lazily** — not on first message. This enables the accoun
 
 ### What `setup_wallets` Does
 
-1. Creates Solana wallet (`chainType: 'solana'`) via Privy
-2. Creates Base/EVM wallet (`chainType: 'ethereum'`) via Privy
-3. Stores in DB: `address`, `privyWalletId`, `chain`, `walletType=EOA`
-4. Registers both wallets with the deposit monitor for real-time notifications
+Creates **5 wallets** across all supported chains:
+
+1. **Solana** — Native wallet (`chainType: 'solana'`) via Privy
+2. **Base/BSC/Mantle** — Single shared EVM wallet (`chainType: 'ethereum'`) via Privy (same address used for all three)
+3. **TON** — Native wallet (`chainType: 'solana'`, TON-compatible) via Privy
+
+Each wallet stored in DB with: `address`, `privyWalletId`, `chain`, `walletType=EOA`
+
+All wallets registered with deposit monitor for real-time notifications.
 
 ## Signing
 
 All transaction signing happens via Privy's API.
 
-**Solana**
+**Solana & TON**
 ```
 walletService.getSolanaSignTransaction(wallet)
 → Returns a sign function
@@ -36,12 +41,12 @@ walletService.getSolanaSignTransaction(wallet)
 → Returns signed transaction
 ```
 
-**EVM (Base)**
+**EVM (Base, BSC, Mantle)**
 ```
-walletService.getEvmSigner(wallet)
+walletService.getEVMSigner(wallet)
 → Returns an ethers.js-compatible signer
 → Uses privyClient.walletApi.ethereum.signTransaction()
-→ Works with any ethers.js contract call
+→ Works with any ethers.js contract call (same address for all 3 chains)
 ```
 
 ## Key Export
@@ -65,13 +70,19 @@ Uses HPKE encryption (required by Privy):
 model Wallet {
   id            String     @id @default(uuid())
   userId        String
-  chain         Chain      // SOLANA, BASE, ETHEREUM
+  chain         String     // SOLANA, BASE, BSC, MANTLE, TON
   address       String
   privyWalletId String?
-  walletType    WalletType // EOA, SMART_WALLET, CUSTODIAL
+  walletType    String     // EOA, SMART_WALLET, CUSTODIAL
   isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
   @@unique([userId, chain])
 }
 ```
+
+**Address sharing:**
+- **SOLANA**: Unique base58 address per user
+- **BASE, BSC, MANTLE**: Share one EVM address (0x...) — same address for all three
+- **TON**: Unique TON address per user
 
 Each user has exactly one active wallet per chain.

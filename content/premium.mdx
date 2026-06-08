@@ -1,24 +1,24 @@
 ---
-title: Pricing Model — Pay-Per-Use
+title: Pricing Model — Premium & Pay-Per-Use
 ---
 
 # Pricing Model
 
-Pantr uses **post-paid pay-per-use** pricing. Users pay only for what they use, with no subscriptions.
+Pantr offers **two payment options** — users choose their preferred model.
 
 ## Core Value: Alpha Auto-Buy
 
-Pantr's primary value is the **alpha caller tracking feature** — when a tracked caller posts a contract address, Pantr automatically executes a buy. This is the only feature that incurs charges.
+Pantr's primary value is the **alpha caller tracking feature** — when a tracked caller posts a contract address, Pantr automatically executes a buy. This is the feature that incurs charges under pay-per-use.
 
 ## Pricing Structure
 
-| Feature | Cost |
-|---------|------|
-| Trade execution (buy/sell) | 2% of trade amount |
-| Alpha auto-buy (tracked caller posts CA) | $1 flat per auto-buy |
-| Auto-sell (TP/SL) | Free |
-| Manual trades | 2% of trade amount |
-| All other features | Free |
+| Feature | Pay-Per-Use | Premium ($20/month) |
+|---------|------------|-------------------|
+| Trade execution (buy/sell) | 2% of trade amount | 2% of trade amount |
+| Alpha auto-buy (tracked caller posts CA) | $1 flat per auto-buy | Unlimited (no per-trade charge) |
+| Auto-sell (TP/SL) | Free | Free |
+| Manual trades | 2% of trade amount | 2% of trade amount |
+| All other features | Free | Free |
 
 ## User Tiers
 
@@ -28,16 +28,18 @@ Pantr's primary value is the **alpha caller tracking feature** — when a tracke
 - **Expiry:** Never (no time limit)
 - **Use case:** Users testing the bot before committing funds
 
-### Premium (Grandfathered)
-- **Cost:** FREE until `premiumUntil` date
-- **Charges:** None during premium period
-- **After expiry:** Fallback to standard pay-per-use ($1 per alpha auto-buy)
-- **Use case:** Users who paid for premium before the model changed
+### Premium Subscription ($20/month)
+- **Cost:** $20/month recurring
+- **Charges:** None for alpha auto-buys; 2% platform fee on trades (same as pay-per-use)
+- **Upgrade/downgrade:** Anytime (no lock-in)
+- **Wallet required:** Active wallet with balance to deposit funds and pay 2% trade fees
+- **Use case:** Users who auto-buy frequently and want no per-trade charge
 
-### Standard (Post-Paid)
+### Pay-Per-Use (Standard)
 - **Cost:** $1 per alpha auto-buy + 2% on all trades
 - **Charges:** Deducted from wallet after successful execution
-- **Required:** Active wallet with balance (SOL, ETH, or MNT)
+- **Wallet required:** Active wallet with balance (SOL, ETH, BNB, MNT, or TON)
+- **Use case:** Users who use alpha features selectively
 
 ## How It Works
 
@@ -50,24 +52,25 @@ Pantr's primary value is the **alpha caller tracking feature** — when a tracke
 5. User can trade freely until they disable demo
 ```
 
-### Standard User Flow
+### Premium Subscriber Flow
 ```
-1. User has isDemo = false AND premiumUntil < now
+1. User subscribes: $20/month premium plan
+2. Tracks alpha callers
+3. Caller posts contract address
+4. Pantr executes buy
+5. NO CHARGE for the auto-buy (premium included)
+6. 2% platform fee deducted on the token sale (same as pay-per-use)
+7. Can upgrade/downgrade anytime (prorated billing)
+```
+
+### Pay-Per-Use User Flow
+```
+1. User has isDemo = false AND no active premium subscription
 2. Tracks an alpha caller
 3. Caller posts contract address
 4. Pantr executes buy + charges $1 from wallet
 5. Charge recorded in alpha_charges table
 6. If wallet has insufficient balance → charge fails, auto-buy skipped, user notified
-```
-
-### Grandfathered Premium User Flow
-```
-1. User has premiumUntil = 2026-07-15 (still active)
-2. Tracks alpha callers
-3. Caller posts → Pantr auto-buys
-4. NO CHARGE (still within premium period)
-5. At 2026-07-16 → isDemo = false, premiumUntil expires
-6. Next auto-buy → $1 charge applies
 ```
 
 ## Charging Logic
@@ -123,28 +126,28 @@ model AlphaCharge {
 | `[ALPHA:CHARGE_FAILED]` | $1 charge failed, auto-buy skipped, user notified |
 | `shouldChargeForAlpha: user exempt (demo or premium)` | No charge applied — user in demo or premium period |
 
-## Migration from Old Model
+## Multi-Chain Charging
 
-### Before (Subscription)
-```
-$10/month premium subscription
-1 free alpha trade/day
-Unlimited for premium users
-```
+Premium and pay-per-use models work across **all 5 chains**:
 
-### After (Pay-Per-Use)
-```
-$1 per alpha auto-buy (only feature that's charged)
-Demo: unlimited free trades
-Standard: pay $1 when you use it
-```
+- **Solana** — charges in SOL
+- **Base** — charges in ETH
+- **BSC** — charges in BNB
+- **Mantle** — charges in MNT
+- **TON** — charges in TON
 
-### Grandfathering Premium Users
+Users can auto-buy on any chain. Premium subscription covers all chains (no per-chain cost).
 
-Users who paid for premium before the switch:
-- Keep their premium access until `premiumUntil` expires
-- No charge during that period
-- No refunds
-- After expiry: $1 per alpha auto-buy
+## Supported Payment Methods
 
-This ensures fairness and avoids chargeback risk.
+All charges are post-paid from active wallets:
+
+| Chain | Native Asset | Charged For |
+|-------|-------------|------------|
+| Solana | SOL | Alpha auto-buy ($1 equiv), 2% trade fee |
+| Base | ETH | Alpha auto-buy ($1 equiv), 2% trade fee |
+| BSC | BNB | Alpha auto-buy ($1 equiv), 2% trade fee |
+| Mantle | MNT | Alpha auto-buy ($1 equiv), 2% trade fee |
+| TON | TON | Alpha auto-buy ($1 equiv), 2% trade fee |
+
+Premium subscribers skip the per-trade charge on all chains.

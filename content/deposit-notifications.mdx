@@ -25,6 +25,10 @@ The fix is to push filtering to the RPC provider. Alchemy delivers only events t
 | Solana | SOL (native) | `onAccountChange` per wallet → lamport balance delta |
 | Base | USDC | `eth_subscribe('logs', …)` with recipient (`topics[2]`) filtered to tracked wallets |
 | Base | ETH (native) | `eth_subscribe('alchemy_minedTransactions', …)` with `to` address filter |
+| BSC | USDC | `eth_subscribe('logs', …)` with recipient filter (Alchemy websocket) |
+| BSC | BNB (native) | `eth_subscribe('alchemy_minedTransactions', …)` with `to` address filter |
+| Mantle | MNT (native) | Polling every 30s via JSON-RPC `getBalance()` |
+| TON | TON (native) | Polling every 45s via TonWeb client |
 
 ### Minimum thresholds
 
@@ -32,6 +36,9 @@ Tiny dust transfers are ignored to avoid notification spam:
 
 - SOL: `0.0001`
 - ETH: `0.00001`
+- BNB: `0.001`
+- MNT: `0.01`
+- TON: `0.1`
 - USDC: `0.01`
 
 ## Architecture
