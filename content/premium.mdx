@@ -1,77 +1,150 @@
 ---
-title: Premium Model
+title: Pricing Model — Pay-Per-Use
 ---
 
-# Premium Model
+# Pricing Model
 
-$10/month, paid in SOL or Base ETH. Handled by `src/routes/premium.js`.
+Pantr uses **post-paid pay-per-use** pricing. Users pay only for what they use, with no subscriptions.
 
-## Free vs Premium
+## Core Value: Alpha Auto-Buy
 
-| Feature | Free | Premium |
-|---------|------|---------|
-| Trade fee on close | 2% | 2% |
-| Messages/day | 5 | Unlimited |
-| Alpha auto-buys/day | 1 | Unlimited |
-| Auto-sell (TP/SL) | No | Yes |
-| Scheduled actions | No | Yes |
-| Limit orders | No | Yes (coming soon) |
-| DCA | No | Yes (coming soon) |
+Pantr's primary value is the **alpha caller tracking feature** — when a tracked caller posts a contract address, Pantr automatically executes a buy. This is the only feature that incurs charges.
 
-## Payment Flow
+## Pricing Structure
 
-1. User: "subscribe to premium" (or Claude suggests it)
-2. Claude calls `subscribe_premium(chain='SOLANA'|'BASE')`
-3. Tool executor calls `executePremiumPayment(userId, chain)`
+| Feature | Cost |
+|---------|------|
+| Trade execution (buy/sell) | 2% of trade amount |
+| Alpha auto-buy (tracked caller posts CA) | $1 flat per auto-buy |
+| Auto-sell (TP/SL) | Free |
+| Manual trades | 2% of trade amount |
+| All other features | Free |
 
-### Solana Path
+## User Tiers
 
-- Fetch SOL price from price oracle
-- Calculate: `$10 / solPrice = amountSol`
-- Build SOL transfer to `TREASURY_WALLET_SOLANA`
-- Sign via Privy
-- Confirm transaction
+### Demo Mode (isDemo = true)
+- **Cost:** FREE
+- **Charges:** None — all features unlimited
+- **Expiry:** Never (no time limit)
+- **Use case:** Users testing the bot before committing funds
 
-### Base ETH Path
+### Premium (Grandfathered)
+- **Cost:** FREE until `premiumUntil` date
+- **Charges:** None during premium period
+- **After expiry:** Fallback to standard pay-per-use ($1 per alpha auto-buy)
+- **Use case:** Users who paid for premium before the model changed
 
-- Fetch ETH price from price oracle
-- Calculate: `$10 / ethPrice = amountEth`
-- Transfer via ethers.js signer to `TREASURY_WALLET_BASE`
-- Wait for 1 block confirmation
+### Standard (Post-Paid)
+- **Cost:** $1 per alpha auto-buy + 2% on all trades
+- **Charges:** Deducted from wallet after successful execution
+- **Required:** Active wallet with balance (SOL, ETH, or MNT)
 
-### After Payment
+## How It Works
 
-- Create `PremiumPayment` record (status: CONFIRMED)
-- Set `user.isPremium = true`
-- Set `user.premiumUntil = now + 30 days`
-- Clear any cached rate limit flags in Redis
+### Demo User Flow
+```
+1. User joins → isDemo = true
+2. User tracks alpha callers
+3. Caller posts → Pantr auto-buys
+4. NO CHARGE (demo exempt)
+5. User can trade freely until they disable demo
+```
 
-## Expiry
+### Standard User Flow
+```
+1. User has isDemo = false AND premiumUntil < now
+2. Tracks an alpha caller
+3. Caller posts contract address
+4. Pantr executes buy + charges $1 from wallet
+5. Charge recorded in alpha_charges table
+6. If wallet has insufficient balance → charge fails, auto-buy skipped, user notified
+```
 
-Background job runs every hour (`premiumExpiration`):
+### Grandfathered Premium User Flow
+```
+1. User has premiumUntil = 2026-07-15 (still active)
+2. Tracks alpha callers
+3. Caller posts → Pantr auto-buys
+4. NO CHARGE (still within premium period)
+5. At 2026-07-16 → isDemo = false, premiumUntil expires
+6. Next auto-buy → $1 charge applies
+```
 
-1. Find users where `premiumUntil < now` and `isPremium = true`
-2. Set `isPremium = false`
-3. Send TG notification: "Your premium has expired"
+## Charging Logic
 
-## Premium Status Check
+When `chargeAlphaAutoBuy()` is triggered:
 
-`check_premium_status` tool returns:
+1. Check if user should be charged (exempt if demo/premium)
+2. If exempt → no charge, continue
+3. If charged:
+   - Find user's active wallet
+   - Calculate charge amount in native asset
+   - Execute blockchain transfer to treasury
+   - Sign via Privy custody
+   - Record in `AlphaCharge` table
+4. Return success/failure status
 
-- `isPremium`: boolean
-- `premiumUntil`: date
-- `daysRemaining`: number
+### Failed Charges
 
-## Pricing Endpoint
+If charge fails:
+- Alpha auto-buy is **skipped** (no trade executed)
+- Dev is notified via error channel
+- No user notification (prevents confusion)
+- Charge is recorded as failed for audit
 
-`GET /api/premium/pricing` returns both payment options:
+## Database Schema
 
-```json
-{
-  "priceUsd": 10,
-  "payments": [
-    { "chain": "SOLANA", "currency": "SOL", "amount": 0.067, "price": 149.25 },
-    { "chain": "BASE", "currency": "ETH", "amount": 0.0039, "price": 2564.10 }
-  ]
+### User Model (Updated)
+```prisma
+model User {
+  isDemo       Boolean   @default(true)
+  premiumUntil DateTime? // grandfathered premium expires at this date
 }
 ```
+
+### AlphaCharge Model (New)
+```prisma
+model AlphaCharge {
+  userId       String
+  alphaGroupId String?  // which caller triggered the charge
+  chargeType   String   // "alpha_auto_buy"
+  amountUsd    Float    @default(1.0)
+  chain        String?  // blockchain network
+  txHash       String?  // blockchain tx hash
+  status       String   @default("charged")
+}
+```
+
+## Log Messages
+
+| Log | Meaning |
+|-----|---------|
+| `[ALPHA:CHARGED]` | $1 charge succeeded, txHash recorded |
+| `[ALPHA:CHARGE_FAILED]` | $1 charge failed, auto-buy skipped, user notified |
+| `shouldChargeForAlpha: user exempt (demo or premium)` | No charge applied — user in demo or premium period |
+
+## Migration from Old Model
+
+### Before (Subscription)
+```
+$10/month premium subscription
+1 free alpha trade/day
+Unlimited for premium users
+```
+
+### After (Pay-Per-Use)
+```
+$1 per alpha auto-buy (only feature that's charged)
+Demo: unlimited free trades
+Standard: pay $1 when you use it
+```
+
+### Grandfathering Premium Users
+
+Users who paid for premium before the switch:
+- Keep their premium access until `premiumUntil` expires
+- No charge during that period
+- No refunds
+- After expiry: $1 per alpha auto-buy
+
+This ensures fairness and avoids chargeback risk.

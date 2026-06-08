@@ -130,29 +130,9 @@ Claude chains `manage_alpha_callers` with all fields in one call. The `alphaGrou
 
 ## Database Models
 
-```prisma
-model AlphaGroup {
-  id             String   @id @default(uuid())
-  userId         String
-  groupUsername  String?  // @handle or t.me/+hash
-  groupTitle     String?
-  callerUsername String   // without @
-  isActive       Boolean  @default(true)
-  tradesExecuted Int      @default(0)
-  buyAmountUsd   Decimal? @db.Decimal(18, 6)
-  takeProfitPct  Decimal? @db.Decimal(5, 2)
-  stopLossPct    Decimal? @db.Decimal(5, 2)
-  @@unique([userId, callerUsername, groupUsername])
-}
-
-model UserTelegramSession {
-  id            String   @id @default(uuid())
-  userId        String   @unique
-  sessionString String
-  phone         String?
-  connectedAt   DateTime @default(now())
-}
-```
+Alpha caller tracking and session management are stored in the database. Key models:
+- `AlphaGroup` — tracks which callers user is monitoring and per-caller strategies
+- `UserTelegramSession` — stores encrypted MTProto session state
 
 ## Log Messages
 
@@ -166,14 +146,21 @@ model UserTelegramSession {
 
 The `no CA in message` log fires often for active callers who post non-trade content. It is not actionable.
 
-## Daily Limits
+## Pricing
 
-| Tier | Alpha Auto-buys/Day |
-|------|---------------------|
-| Free | 1 |
-| Premium | Unlimited |
+| Tier | Cost per Alpha Auto-Buy | Limit |
+|------|-------------------------|-------|
+| Demo | FREE | Unlimited |
+| Premium (grandfathered) | FREE (until expiry) | Unlimited |
+| Standard | $1 per auto-buy | Unlimited |
 
-Tracked via Redis key: `alpha:buys:{userId}` with 24h TTL.
+**How it works:**
+- When a tracked caller posts a contract address, Pantr auto-buys and charges $1 (post-paid)
+- Charge is deducted from user's wallet (SOL, ETH, or MNT)
+- If wallet has insufficient balance, charge fails and auto-buy is skipped
+- Demo users and grandfathered premium users are never charged
+
+See [[Premium Model]] for full details on pricing tiers and how charging works.
 
 ## Privacy
 
