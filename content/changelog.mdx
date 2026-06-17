@@ -57,14 +57,19 @@ simplified the revenue model.
   exempted from the HTTPS enforcer for Railway's health check. Fonts for PnL-card
   rendering installed via `railpack.json` `deploy.aptPackages` (Railway uses Railpack,
   not Nixpacks).
-- **Revenue model: subscriptions → pay-per-use, then 2% fee only.** Removed the
-  `/month` premium subscription model and its routes/expiry job. Dropped `isPremium`,
-  `isOnTrial`, `autoRenew` columns. The current model is the **2% close fee** on trades
-  as the single revenue driver, keeping alpha-caller tracking as the core value.
+- **Revenue model: subscriptions → usage-based.** Removed the `/month` premium
+  subscription model and its routes/expiry job (dropped `isPremium`, `isOnTrial`,
+  `autoRenew` columns). The current model is **usage-based**, charged in native token:
+  - **2% close fee** on every sell (`PLATFORM_FEE_BPS=200`).
+  - **$1 per alpha auto-buy** — post-paid, only on successful execution (`ALPHA_CHARGE_USD`).
+  - **$1 per auto-sell execution** — TP / SL / rug exit, on success (`AUTO_SELL_CHARGE_USD`).
+  - Demo users and grandfathered premium users are exempt; charge failures notify DEV,
+    not the user.
 
 ### Added
-- **TON support** — real TON wallet creation, trading, and multi-chain alpha routing
-  (`e71b830`). TON joins Solana/Base/BSC/Mantle.
+- **BSC + TON support** — added together: real TON/BSC wallet creation, trading, and
+  multi-chain alpha routing (`e71b830`, `507465c`, `3ab7c9f`). Pantr now spans
+  Solana / Base / BSC / Mantle / TON.
 
 ---
 

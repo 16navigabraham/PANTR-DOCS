@@ -125,17 +125,24 @@ Each aggregator:
 
 ## Fees
 
-| Event | Fee |
-|-------|-----|
-| Buy (manual or alpha auto-buy) | **0%** — no platform fee on entry |
-| Close (manual sell, TP trigger, SL trigger) | **2%** taken from native token received (SOL or ETH) |
+Pantr's revenue model is **usage-based**, charged in the chain's native token. There is
+no subscription.
 
-Fee is taken from the output amount after the swap:
+| Event | Charge |
+|-------|--------|
+| Buy (manual) | **0%** — no platform fee on a manual entry |
+| Alpha auto-buy | **$1** flat, post-paid in native token, only on successful execution |
+| Close (manual sell, TP / SL / rug exit) | **2%** of native token received |
+| Auto-sell execution (TP / SL / rug) | **$1** flat, on success — on top of the 2% close fee |
 
-- User sells tokens → receives 1.0 SOL → 0.02 SOL fee → user gets 0.98 SOL
-- Fee transferred to treasury wallet in the same transaction
+- Demo users and grandfathered premium users are exempt from all charges.
+- The 2% close fee is taken from the output amount after the swap: sell → receive 1.0 SOL
+  → 0.02 SOL fee → user gets 0.98 SOL → transferred to treasury in the same transaction.
+- The flat $1 charges are post-paid (only on success) and notify DEV on failure, never
+  the user.
 
-Fee collection: `src/services/fee-collector.js`
+Fee collection: `src/services/fee-collector.js` (2% close fee) ·
+`src/services/alpha-charge.js` (flat usage charges).
 
 ## Buy Speed (Priority Fee Tiers)
 
