@@ -4,6 +4,62 @@ title: Changelog
 
 # Changelog
 
+## v0.7.1 — Stability & Onboarding Bug-Bash
+*2026-06-17*
+
+A focused round of production fixes found during live testing — MTProto reliability,
+demo mode, multi-chain wallets, settings, and dependency security.
+
+### Fixed — MTProto (alpha tracking)
+- **Sessions self-revoking (`AUTH_KEY_DUPLICATED`).** The reconnect guard spawned a
+  *duplicate* client on every connection blip while gramjs was already auto-reconnecting
+  the same session → Telegram saw two connections on one auth key and permanently
+  revoked it. Layer-1 now observes only (lets gramjs self-heal); the heartbeat
+  disconnects the old client before any rebuild.
+- **Deploy-overlap revocation.** Graceful shutdown didn't disconnect MTProto, so a
+  rolling Railway deploy briefly ran old + new containers on the same session → same
+  revocation. Added `stopAll()` to release auth keys on `SIGTERM`.
+- **Channel + group messages silently stopped after a reconnect.** Broadcast channels
+  use a separate update stream that goes stale across a reconnect; the previous code
+  re-primed it as a side effect of recreating the client, which the revocation fix
+  removed. Now `getDialogs` re-primes channel+group updates on reconnect (and as a
+  5-min heartbeat safety net) — *without* recreating the client.
+- **Logging cleaned up** — per-chat resolution spam replaced with one grouped
+  success-rate line per listener: `MTProto: chats 3/3 resolved (100%)`.
+
+### Fixed — Demo mode
+- **`reset_demo` did nothing.** There was no LLM tool for it, so "reset demo" mapped to
+  `set_trading_mode` (a no-op). Added a real `reset_demo` tool that clears demo trade
+  history and restores the balance.
+- **Demo balances depleted instantly + missing chains.** Balances were native-unit with
+  a broken `amountUsd/100` deduction (a $50 Base buy "spent" ~$1,250 of ETH), and BSC/TON
+  had no pool — they silently drained the tiny shared ETH pool. Now **USD-notional pools
+  per chain**, seeded **$10,000 each across all five chains** (Solana/Base/BSC/Mantle/TON),
+  deducting the actual trade USD and returning sell proceeds.
+- **Couldn't sell an open demo position.** `simulateSell` matched the token address
+  exactly, but EVM addresses are case-insensitive (checksummed buy vs lowercased sell) →
+  "no open position." Now matched case-insensitively (and the portfolio nets them as one).
+
+### Fixed — Wallets
+- **EVM wallets got a different address per chain.** Base/BSC/Mantle were created
+  concurrently, each missing the not-yet-committed shared anchor → three separate Privy
+  wallets. EVM creation is now serialized per user (first creates the anchor, rest reuse
+  it). A backfill **consolidation pass** repairs already-split users by repointing the
+  divergent rows to one canonical EVM address (idempotent; loud log if a divergent
+  address ever held funds).
+
+### Fixed — Settings & security
+- **BSC/TON (and web Mantle) buy-amount updates silently dropped** — the fields were
+  advertised to the LLM but missing from the `update_settings` allow-list and the
+  settings API schema, so updates were filtered out. Added.
+- **Dependency vulnerabilities: 6 high → 0.** Patched `ws`, `bn.js`, and `hono` via
+  scoped npm `overrides` — without downgrading the money-critical libs (`ethers`,
+  `@privy-io/*`, `tonweb`) that `npm audit fix --force` wanted to roll back.
+- **CI lint fix** — the lint job had no dependency-install fallback, so a lockfile change
+  made it fetch a wrong fresh ESLint; now installs on cache miss and pins the local one.
+
+---
+
 ## v0.7.0 — Lightning Sell-Side: Rug Exit + Real-Time WSS + Buy Speed Tiers
 *2026-06-17*
 
