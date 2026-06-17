@@ -125,24 +125,28 @@ Each aggregator:
 
 ## Fees
 
-Pantr's revenue model is **usage-based**, charged in the chain's native token. There is
-no subscription.
+Pantr's revenue is charged in the chain's native token — a **2% close fee** for everyone,
+plus flat **$1 usage charges** for non-premium users (premium waives the $1 charges).
 
-| Event | Charge |
-|-------|--------|
-| Buy (manual) | **0%** — no platform fee on a manual entry |
-| Alpha auto-buy | **$1** flat, post-paid in native token, only on successful execution |
-| Close (manual sell, TP / SL / rug exit) | **2%** of native token received |
-| Auto-sell execution (TP / SL / rug) | **$1** flat, on success — on top of the 2% close fee |
+| Event | Non-premium | Premium ($20/mo) |
+|-------|-------------|------------------|
+| Buy (manual) | **0%** | 0% |
+| Alpha auto-buy | **$1** flat, on success | exempt |
+| Close (manual sell, TP / SL / rug exit) | **2%** of native received | **2%** |
+| Auto-sell execution (TP / SL / rug) | **$1** flat, on success | exempt |
 
-- Demo users and grandfathered premium users are exempt from all charges.
-- The 2% close fee is taken from the output amount after the swap: sell → receive 1.0 SOL
-  → 0.02 SOL fee → user gets 0.98 SOL → transferred to treasury in the same transaction.
+- **Premium** ($20/mo, `PREMIUM_PRICE_USD`) waives the flat $1 charges — premium users
+  still pay the 2% close fee. Auto-renews in the chain the user last paid with
+  (`subscribe_premium` tool, `checkPremiumExpiry` job).
+- **Demo users** are exempt from everything.
+- The 2% close fee is taken from the output after the swap: sell → receive 1.0 SOL →
+  0.02 SOL fee → user gets 0.98 SOL → transferred to treasury in the same transaction.
 - The flat $1 charges are post-paid (only on success) and notify DEV on failure, never
   the user.
 
 Fee collection: `src/services/fee-collector.js` (2% close fee) ·
-`src/services/alpha-charge.js` (flat usage charges).
+`src/services/alpha-charge.js` (flat usage charges) · `src/services/premium-expiry.js`
+(premium renewals).
 
 ## Buy Speed (Priority Fee Tiers)
 

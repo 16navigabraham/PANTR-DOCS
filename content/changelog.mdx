@@ -57,14 +57,17 @@ simplified the revenue model.
   exempted from the HTTPS enforcer for Railway's health check. Fonts for PnL-card
   rendering installed via `railpack.json` `deploy.aptPackages` (Railway uses Railpack,
   not Nixpacks).
-- **Revenue model: subscriptions → usage-based.** Removed the `/month` premium
-  subscription model and its routes/expiry job (dropped `isPremium`, `isOnTrial`,
-  `autoRenew` columns). The current model is **usage-based**, charged in native token:
-  - **2% close fee** on every sell (`PLATFORM_FEE_BPS=200`).
-  - **$1 per alpha auto-buy** — post-paid, only on successful execution (`ALPHA_CHARGE_USD`).
-  - **$1 per auto-sell execution** — TP / SL / rug exit, on success (`AUTO_SELL_CHARGE_USD`).
-  - Demo users and grandfathered premium users are exempt; charge failures notify DEV,
-    not the user.
+- **Revenue model: added usage-based charges alongside premium.** The legacy boolean
+  fields (`isPremium`, `isOnTrial`, `autoRenew`) were dropped in favour of a date-based
+  `premiumUntil` check; the `/month` premium subscription itself was briefly removed when
+  pay-per-use was introduced, then **restored** (06-09, `checkPremiumExpiry` re-enabled).
+  Current model, charged in native token:
+  - **2% close fee** on every sell — all users (`PLATFORM_FEE_BPS=200`).
+  - **$1 per alpha auto-buy** — non-premium only, post-paid on success (`ALPHA_CHARGE_USD`).
+  - **$1 per auto-sell execution** — non-premium only, TP / SL / rug, on success (`AUTO_SELL_CHARGE_USD`).
+  - **Premium ($20/mo, `PREMIUM_PRICE_USD`)** — exempt from the $1 charges (still pays the
+    2% close fee); auto-renews in the chain the user last paid with.
+  - **Demo users** are exempt from everything. Charge failures notify DEV, not the user.
 
 ### Added
 - **BSC + TON support** — added together: real TON/BSC wallet creation, trading, and
