@@ -4,11 +4,12 @@ title: Environment Variables
 
 # Environment Variables
 
-## pantr-server (Render)
+## pantr-server (Railway)
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | Neon Postgres connection string |
+| `DATABASE_URL` | Turso (libsql) connection string |
+| `TURSO_AUTH_TOKEN` | Turso auth token (if not embedded in the URL) |
 | `REDIS_URL` | Upstash Redis — conversation history + rate limits |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather |
 | `ANTHROPIC_API_KEY` | Claude API |
@@ -27,7 +28,22 @@ title: Environment Variables
 | `TELEGRAM_API_HASH` | From [my.telegram.org/apps](https://my.telegram.org/apps) — required for MTProto alpha tracking |
 | `SENDGRID_API_KEY` | Email for account recovery codes |
 | `FROM_EMAIL` | Sender address for those emails |
+| `BIRDEYE_API_KEY` | Birdeye price/metadata provider (REST fallback in the price oracle) |
 | `PORT` | Default 3000 |
+
+### Optional tuning (sane defaults — leave unset to use them)
+
+These are **not required**. The features they tune are on by default; these only exist
+to adjust behaviour if ever needed.
+
+| Variable | Default | Tunes |
+|----------|---------|-------|
+| `RUG_DROP_PCT` | `50` | Rug exit: % collapse from peak that triggers an emergency sell |
+| `RUG_WINDOW_SECS` | `180` | Rug exit: rolling window for the velocity check |
+| `PRICE_STREAM_MAX_SUBS` | `50` | Max concurrent WSS bonding-curve subscriptions (free RPC tier cap) |
+| `ALPHA_PRIORITY_FEE_LAMPORTS` | `500000` | Higher priority-fee floor for alpha (trenches) buys |
+| `PRIORITY_FEE_FLOOR/CEILING/MULTIPLIER_*` | — | Dynamic Auto priority-fee bounds |
+| `PRIORITY_FEE_FAST_MULT` / `PRIORITY_FEE_TURBO_MULT` | `1.6` / `2.5` | Fast/Turbo buy-speed tier multipliers |
 
 ## pantr-admin (Vercel)
 
@@ -44,4 +60,4 @@ Static HTML, no env vars. API URL is hardcoded in `index.html` — update the `c
 
 `ADMIN_SECRET` is the same value on both server and admin — the admin proxies it as a Bearer token and the server checks it.
 
-Never commit `.env` files. Render injects vars at runtime so no `.env` needed there. Locally, copy `.env.example` → `.env`.
+Never commit `.env` files. Railway injects vars at runtime so no `.env` needed there. Locally, copy `.env.example` → `.env`.

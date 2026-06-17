@@ -38,7 +38,7 @@ Background job runs every 5 seconds (`src/services/auto-sell.js`):
       - Resolve effective TP/SL: callerOverride ?? globalSetting
       - Skip if neither is set for this holding
       - Use FIFO cost basis (proportional, not cumulative all-time spend)
-      - Get current price (batched, 15s cache)
+      - Get current price (batched, 60s cache; pump.fun tokens priced sub-second over WSS)
       - Calculate unrealized P&L %
       - TP: if P&L >= effectiveTpPct → SELL (exact threshold)
       - SL: if P&L <= -(effectiveSlPct - slippageBuffer) → SELL (pre-trigger)
@@ -95,6 +95,46 @@ Settings: TP 100%, SL 50%, max slippage 1500 bps (15%) → SL buffer = 3%
 - **Confirmed-empty cache**: tokens confirmed not held on-chain are skipped in the next cycles to avoid repeated Alchemy scans
 - **Stablecoins excluded**: USDC/USDT on both chains never trigger TP/SL
 - **Dust epsilon**: positions below `0.000001` held are filtered (floating-point residue after selling)
+
+## Rug Exit (Emergency Sell)
+
+Beyond take-profit and stop-loss, the agent runs an **always-on rug detector** that
+closes a position the moment its price collapses — protecting against rugs and LP
+pulls that stop-loss can't catch.
+
+**How it differs from stop-loss:** it's velocity-based, not threshold-based. Stop-loss
+says *"sell at -25% from my cost."* The rug detector says *"the price just fell off a
+cliff from where it was minutes ago"* — regardless of your cost or your SL setting.
+
+**Signal:** a drop of **≥ 50%** from the token's rolling peak within a **180-second**
+window (`src/services/rug-detector.js`). On trip, the agent sells 100% immediately and
+sends a single **🚨 Rug Exit** notification (same execution path as stop-loss).
+
+**What it catches that stop-loss can't:**
+
+- **Rugs during the grace period** — stop-loss is intentionally off for the first 5
+  minutes after a buy (to ignore entry slippage); the rug detector still fires.
+- **Collapses when SL is loose or off** — a sudden crash exits even with no stop-loss set.
+- **The event, not a fixed loss number** — it reacts to the *speed* of the fall.
+
+No setup required — it's core agent behaviour, on for everyone using auto-sell. The
+sensitivity is a conservative default tuned to a real collapse (not a normal wick); it
+can be tuned via `RUG_DROP_PCT` / `RUG_WINDOW_SECS` if ever needed.
+
+## Real-Time Pricing (WSS)
+
+For pump.fun bonding-curve tokens — the freshest, most volatile memecoins where fast
+exits actually win money — Pantr subscribes to the bonding-curve account directly over
+an RPC WebSocket (`src/services/price-stream-manager.js`) and recomputes price the
+instant on-chain reserves change. This is the **same reserve decode** that
+`pumpswap-direct` uses to execute real swaps, so it's already trusted.
+
+- **Sub-second, no REST rate limits** for held pump tokens — feeds both the price cache
+  the auto-sell loop reads and the rug detector's velocity window in real time.
+- **Graceful fallback:** any RPC/subscribe failure falls back to the REST price path —
+  the stream can only make pricing fresher, never break it.
+- **Scope:** pump.fun bonding curves on Solana. Graduated/AMM tokens and EVM/TON use the
+  REST price path. Subscriptions match exactly the Solana tokens currently held.
 
 ## Actual P&L Reporting
 

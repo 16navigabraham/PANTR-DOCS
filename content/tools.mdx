@@ -150,6 +150,8 @@ Update any settings in one call. Only include fields the user explicitly mention
 | `stopLossPct` | number | Auto-sell on drop. Min 10. 0 = off |
 | `sniperMaxAgeSecs` | number | Skip alpha buy if pair older than N secs. 0 = off |
 | `sniperMaxPumpPct` | number | Skip alpha buy if already pumped > N% in 5min. 0 = off |
+| `priorityFeeTier` | string | Solana buy speed: `auto` (default) · `fast` · `turbo` · `custom` |
+| `priorityFeeCustomMicroLamports` | number | Exact priority fee (µLam/CU) when tier is `custom` |
 
 ---
 

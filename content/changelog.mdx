@@ -4,6 +4,70 @@ title: Changelog
 
 # Changelog
 
+## v0.7.0 — Lightning Sell-Side: Rug Exit + Real-Time WSS + Buy Speed Tiers
+*2026-06-17*
+
+### Added
+- **Rug Exit (always-on)** — `src/services/rug-detector.js`. A velocity-based detector
+  that closes a position 100% the instant its price collapses ≥50% from a rolling peak
+  within 180s — catching rugs/LP-pulls that stop-loss can't, including during the 5-min
+  post-buy grace period where stop-loss is intentionally off. Core agent behaviour, no
+  setup, single "🚨 Rug Exit" notification on trigger. Tunable via `RUG_DROP_PCT` /
+  `RUG_WINDOW_SECS`.
+- **Real-time WSS pricing (always-on)** — `src/services/price-stream-manager.js`
+  subscribes to held pump.fun bonding-curve accounts over the RPC WebSocket and
+  recomputes price the instant reserves change (same reserve decode `pumpswap-direct`
+  uses for real swaps). Feeds both the auto-sell price cache and the rug detector's
+  velocity window sub-second. Graceful REST fallback on any failure — can only make
+  pricing fresher, never break it.
+- **Buy speed tiers** — `priorityFeeTier` (auto/fast/turbo/custom) on `UserSettings`.
+  Auto picks a congestion-aware dynamic priority fee; Fast/Turbo bid 1.6×/2.5× to land
+  buys front-of-queue; Custom takes an exact µLam/CU. Set by chat ("set buy speed to
+  turbo"). Resolution in `solana-swap.js` `getTieredPriorityFee`, threaded through the
+  orchestrator into every Solana buy route.
+- **Durable ticker resolution** — `resolveTokenMeta` now persists resolved symbols in
+  the `TokenCache` table, so PnL cards/portfolio never fall back to "TOKEN"/raw address
+  during provider 429 backoffs.
+
+### Changed
+- **Auto-sell refactored to a pure core** — `src/services/auto-sell-core.js` holds the
+  decision logic (holdings netting, trigger evaluation) as pure, unit-tested functions;
+  live and demo paths now share one source of truth instead of two diverging copies.
+  Behaviour preserved (all existing auto-sell tests green) + new core/detector tests.
+- **Removed feature gates** — `RUG_DETECT_MODE` and `PRICE_STREAM_MODE` env flags
+  retired; both features are simply on with graceful fallbacks. Fewer knobs to manage.
+
+---
+
+## v0.6.5 — Infra Migration: Turso + Railway + Pay-Per-Use
+*2026-06-08 → 06-09*
+
+Platform consolidation — moved off a spread of services onto a leaner stack, and
+simplified the revenue model.
+
+### Changed
+- **Database: Neon Postgres → Turso (libsql).** `DATABASE_URL` now points at Turso.
+  Because the original tables were created with `prisma db push` and the legacy
+  migrations are Postgres-syntax (which libsql can't parse), `prisma migrate deploy`
+  was replaced with a **custom libsql migration runner** (`scripts/migrate.js`) that
+  baselines legacy migrations and only executes an allowlist of SQLite-safe ones. A
+  `PRAGMA`-based `ensureColumns` safety net adds any missing columns on every boot —
+  this is how new settings columns land without a formal migration.
+- **Hosting: Render → Railway.** Env vars injected at runtime by Railway; `/health`
+  exempted from the HTTPS enforcer for Railway's health check. Fonts for PnL-card
+  rendering installed via `railpack.json` `deploy.aptPackages` (Railway uses Railpack,
+  not Nixpacks).
+- **Revenue model: subscriptions → pay-per-use, then 2% fee only.** Removed the
+  `/month` premium subscription model and its routes/expiry job. Dropped `isPremium`,
+  `isOnTrial`, `autoRenew` columns. The current model is the **2% close fee** on trades
+  as the single revenue driver, keeping alpha-caller tracking as the core value.
+
+### Added
+- **TON support** — real TON wallet creation, trading, and multi-chain alpha routing
+  (`e71b830`). TON joins Solana/Base/BSC/Mantle.
+
+---
+
 ## v0.6.0 — MTProto Regression Fix + Demo Sells + Rich Cards + Gas Fix
 *2026-05-24*
 

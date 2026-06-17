@@ -137,6 +137,31 @@ Fee is taken from the output amount after the swap:
 
 Fee collection: `src/services/fee-collector.js`
 
+## Buy Speed (Priority Fee Tiers)
+
+On Solana, the **priority fee** (compute-unit price) determines how fast a buy lands —
+a higher fee bids your transaction ahead in the queue. This is landing **speed**, and
+is orthogonal to **slippage** (price tolerance); the two are set independently.
+
+Pantr picks a **congestion-aware dynamic fee** by default — it reads recent network
+prioritization fees (75th percentile × a multiplier, clamped) so buys stay competitive
+without overpaying in calm conditions. Traders can bias this faster per their style:
+
+| Tier | Fee | Use |
+|---|---|---|
+| **Auto** (default) | dynamic, congestion-aware | smart default for everyone |
+| **Fast** | dynamic × 1.6 | land ahead of the Auto crowd |
+| **Turbo** | dynamic × 2.5 | chasing a hot alpha — front of queue |
+| **Custom** | exact value (µLam/CU) | full manual control |
+
+Set via chat: *"set my buy speed to turbo"* → `update_settings(priorityFeeTier='turbo')`.
+Stored on `UserSettings.priorityFeeTier` (+ `priorityFeeCustomMicroLamports` for custom).
+Costs stay trivial — even Turbo is a fraction of a cent per buy. Alpha (trenches) buys
+also carry a higher floor so they stay aggressive even when the network is quiet.
+
+Resolution lives in `solana-swap.js` (`getTieredPriorityFee`) and is threaded through
+`trade-orchestrator.js` into every Solana buy route.
+
 ## Gas Costs
 
 Every on-chain transaction costs network gas, separate from the platform fee:
