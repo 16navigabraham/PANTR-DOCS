@@ -5,10 +5,10 @@ title: Changelog
 # Changelog
 
 ## v0.7.1 — Stability & Onboarding Bug-Bash
-*2026-06-17*
+*2026-06-17 → 06-18*
 
 A focused round of production fixes found during live testing — MTProto reliability,
-demo mode, multi-chain wallets, settings, and dependency security.
+channel/group resolution, demo mode, multi-chain wallets, settings, and dependency security.
 
 ### Fixed — MTProto (alpha tracking)
 - **Sessions self-revoking (`AUTH_KEY_DUPLICATED`).** The reconnect guard spawned a
@@ -26,6 +26,18 @@ demo mode, multi-chain wallets, settings, and dependency security.
   5-min heartbeat safety net) — *without* recreating the client.
 - **Logging cleaned up** — per-chat resolution spam replaced with one grouped
   success-rate line per listener: `MTProto: chats 3/3 resolved (100%)`.
+- **Channel vs group could not be distinguished (channel alpha silently dropped).** A
+  group and a channel with the same name were indistinguishable, so adding "the channel"
+  actually resolved to the group and the channel was never subscribed. Two root causes:
+  (1) the name search matched when *search contained title*, so "AbrahamNAVIG channel"
+  hijacked a group named "AbrahamNAVIG"; (2) classification used `className` only, but in
+  MTProto a `Channel` is both broadcast channels *and* supergroups — the real
+  distinguisher is the `broadcast`/`megagroup` flags
+  ([core.telegram.org/constructor/channel](https://core.telegram.org/constructor/channel)).
+  Now: proper `broadcast`/`megagroup` classification decides the match path, the buggy
+  match half is removed, the `groupType` ("channel"/"group") param and a trailing type
+  word in the name both act as disambiguation hints, and on a true name collision Pantr
+  **asks** which one instead of silently guessing.
 
 ### Fixed — Demo mode
 - **`reset_demo` did nothing.** There was no LLM tool for it, so "reset demo" mapped to
