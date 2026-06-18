@@ -38,6 +38,14 @@ channel/group resolution, demo mode, multi-chain wallets, settings, and dependen
   match half is removed, the `groupType` ("channel"/"group") param and a trailing type
   word in the name both act as disambiguation hints, and on a true name collision Pantr
   **asks** which one instead of silently guessing.
+- **Channel alpha silently dropped even after it resolved correctly.** A broadcast channel
+  posts *as the channel*, not as the caller — but the NewMessage handler matched by sender
+  username, failed, and consumed the dedup slot, blocking the Raw handler that *would* have
+  matched by entity ID. Now broadcast channels are matched by entity ID in both handlers
+  (`_matchCallerByEntityId`), guarded by a regression test. Groups still match by sender.
+- **`groupType` now disambiguates directly.** When a group and channel share a name,
+  answering "channel"/"group" (or passing the `groupType` param) resolves the right entity
+  immediately — no invite link or numeric ID required.
 
 ### Fixed — Demo mode
 - **`reset_demo` did nothing.** There was no LLM tool for it, so "reset demo" mapped to
@@ -51,6 +59,20 @@ channel/group resolution, demo mode, multi-chain wallets, settings, and dependen
 - **Couldn't sell an open demo position.** `simulateSell` matched the token address
   exactly, but EVM addresses are case-insensitive (checksummed buy vs lowercased sell) →
   "no open position." Now matched case-insensitively (and the portfolio nets them as one).
+- **Partial demo buys corrupted cost basis.** A buy deducted `min(amount, balance)`, so a
+  $50 buy on a $2 balance "succeeded" — recording a $50 position funded by $2, and leaving
+  a `$-0.00` balance. Demo buys now require the **full** balance and reject cleanly
+  ("insufficient demo balance") otherwise.
+- **`reset_demo` and balance display** finalized — clean per-chain USD pools, "reset demo"
+  works via chat, balances render as plain USD (no misleading native-token labels).
+
+### Fixed — Price data
+- **Constant 429 storm from rate-limited providers.** Tokens that *no* provider could price
+  (dead/illiquid/pre-index) re-ran the full Jupiter→DexScreener→Birdeye→GeckoTerminal
+  cascade every cycle, keeping GeckoTerminal/Birdeye in perpetual backoff. Added a
+  **negative cache**: a token no provider can price is marked "unpriceable" for 5 min and
+  skipped, while any real price (REST or the WSS stream) clears the mark instantly. Tokens
+  with even a stale price are always served — held positions are never starved.
 
 ### Fixed — Wallets
 - **EVM wallets got a different address per chain.** Base/BSC/Mantle were created
@@ -59,6 +81,9 @@ channel/group resolution, demo mode, multi-chain wallets, settings, and dependen
   it). A backfill **consolidation pass** repairs already-split users by repointing the
   divergent rows to one canonical EVM address (idempotent; loud log if a divergent
   address ever held funds).
+- **Removed the obsolete TON/missing-chain wallet backfill.** `ensureWallets()` creates any
+  missing chain on demand (and signup creates all five), so the boot-time missing-chain
+  backfill was dead weight. Boot now only runs the one-off EVM-address consolidation.
 
 ### Fixed — Settings & security
 - **BSC/TON (and web Mantle) buy-amount updates silently dropped** — the fields were
