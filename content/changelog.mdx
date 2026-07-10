@@ -4,6 +4,179 @@ title: Changelog
 
 # Changelog
 
+## v1.0.1 — Robinhood Chain + Uniswap Trading API + ERC-8004 Live Metadata
+*2026-07-09 → 07-10*
+
+### Added
+- **Robinhood Chain** (chain ID 4663, Arbitrum L2) — full trading support: WETH
+  (`0x0Bd7D308...`), USDG (`0x5fc5360D...`, USD-pegged, 6 decimals), RPC + WebSocket
+  deposit monitoring. USDG deposits credited 1:1 like USDC. The chain is now part of the
+  standard EVM deposit monitor alongside Base, BSC, and Mantle.
+- **Uniswap Trading API as primary swap path** — `src/services/swap/uniswap-trading-api.js`.
+  3-step flow: check approval → quote → swap. Covers V2/V3/V4/UniswapX automatically from
+  one API surface. Active on BASE, ETHEREUM, and ROBINHOOD as the *first* path tried in
+  `executeSwap` (buy) and `executeSell`; existing aggregators remain as fallback. Key
+  details: native ETH passed as zero address, 500 bps default slippage, 20% gas buffer on
+  quoted limit.
+- **`/api/agent-metadata` endpoint** — serves ERC-8004 JSON live from the Express server;
+  no IPFS or Pinata required. On-chain URI (`setAgentURI`) now points at
+  `https://api.pantr.xyz/api/agent-metadata`, so metadata updates automatically with every
+  deploy. Service types use the registry-recognized names (`"web"`, `"A2A"`) and include
+  full x402 payment details and OKX marketplace link.
+- **`/.well-known/agent-registration.json`** in pantr-client (Vercel) — satisfies 8004scan
+  domain-verification for `pantr.xyz`; declares both agentId 50984 (Base) and 93 (Mantle).
+
+### Changed
+- **`UNISWAP_API_KEY`** and **`ROBINHOOD_WS_URL`** added to env schema (both optional;
+  Uniswap Trading API silently skipped if key is absent; Robinhood monitoring skipped if WS
+  URL is absent).
+- `scripts/update-agent-uri.js` rewritten — drops all Pinata/IPFS code; calls `setAgentURI`
+  with `${API_URL}/api/agent-metadata`. Only needs `MANTLE_AGENT_KEY` + `API_URL`.
+
+---
+
+## v1.0.0 — OKX AI Marketplace & x402 Payments
+*2026-07-03 → 07-08*
+
+Pantr listed on the OKX.AI agent marketplace (Agent ID 4197). Any AI agent or human can
+pay per call in USDC on Base via x402.
+
+### Added
+- **OKX ASP endpoints** — `src/routes/okx/`: `POST /okx/user`, `GET /okx/portfolio`,
+  `GET /okx/alpha/latest`, `GET /okx/trade/build`. Each call is gated by x402 payment
+  (USDC on Base, $0.50–$1.00 per endpoint).
+- **x402 v2 middleware** — `402` status + `PAYMENT-REQUIRED: base64(...)` header on
+  non-paying requests; accepts all HTTP methods (OKX validator probes with HEAD/OPTIONS).
+  `/okx/*` paths exempted from scanner-shield allowlist check.
+- **Wallet auto-registration on first `POST /okx/user` payment** — paying agent gets a
+  `userId` + `connectUrl` (`https://t.me/PantrAgent_bot?start=connect_<userId>`) to link
+  Telegram later. Works without Telegram access; the human can tap the link.
+- **Telegram deep-link `/start connect_<userId>`** — bot intercepts `/start` payloads
+  beginning with `connect_` and binds the OKX wallet address to that Pantr account, no
+  extra commands needed.
+- **`/connect <userId>` command** — alternate manual link if the deep-link URL isn't
+  accessible; same backend handler as the deep-link.
+- **ERC-8004 identity registration** — Pantr registered on Base (agentId 50984) and
+  Mantle (agentId 93) via `scripts/register-erc8004-agent.js`. Metadata declares
+  `x402Support: true`, both service types, and the OKX marketplace link.
+
+### Fixed
+- x402 response previously used a non-standard format rejected by the OKX validator;
+  updated to the v2 spec with `PAYMENT-REQUIRED` header.
+- ERC-8004 service names changed from human-readable strings to registry-recognized types
+  (`"web"`, `"A2A"`) — fixed 8004scan "no declared services" flag.
+- On-chain URI pointed at `pantr.xyz/api/agent-metadata` (Vercel frontend, no endpoint);
+  re-run `setAgentURI` on both chains targeting `api.pantr.xyz` (Railway backend).
+- `/.well-known` route removed from pantr-server (wrong host); moved to pantr-client as a
+  static file.
+
+---
+
+## v0.9.0 — Alpha Intelligence & Engagement
+*2026-06-26 → 07-02*
+
+### Added
+- **LLM FOMO nudge** (`c3831d1`) — when an un-funded user's tracked alpha caller fires and
+  they miss the trade, Claude generates a personalised "here's what you missed" DM with
+  the token, caller name, and how much a $100 buy would be worth now. Drives funded
+  conversion.
+- **Full alpha detection→execution trace** (`ebf0651`) — `detectedAt` timestamp captured
+  the moment a caller message is received; paired with `executedAt` on the trade record.
+  Enables latency analytics: time from alpha signal to on-chain buy.
+- **Admin trade-trace endpoint** (`44961fc`) — `GET /admin/trade-trace/:tradeId` returns
+  anonymised latency breakdown (detection → quote → send → confirm) for stat drill-down
+  without exposing user PII.
+- **Native price warm-keeper** (`ce25ebe`) — a background task polls native token prices
+  (SOL/ETH/BNB/MNT/TON) every 30s and writes to Redis so the 429-lifeboat always has a
+  fresh value. Lifeboat TTL dropped from 6h → 1h so stale prices never survive overnight.
+- **Personalised activation nudges** (`560b60b`) — users who deposited but haven't made a
+  first trade receive a tailored DM (wallet balance shown, one-tap "buy" suggestion for a
+  trending token). Sent once; logged to prevent repeat.
+- **Low-balance DM on missed alpha** (`697e83a`) — if a user's funded wallet is below the
+  $3 trade minimum when an alpha fires, they get a "top-up to catch the next one" prompt.
+- **Daily limit on automated mirror + DCA buys** (`fdb5a17`) — prevents a single prolific
+  caller from triggering unlimited auto-buys in one day; configurable per user.
+- **Admin user search by ID** (`6008d4e`) — `GET /admin/user/:id` works with both numeric
+  IDs and the masked log form (`123***789`) so support tickets can be triaged from logs.
+
+### Fixed
+- **Birdeye backoff extended** — Birdeye 429s previously triggered a 60s cooldown; raised
+  to 15 min (matching GeckoTerminal). Prevents cascading 429 storms when Birdeye is busy.
+- **Batch CoinGecko native price calls** (`697e83a`) — instead of one HTTP call per chain,
+  all native tokens fetched in a single `?ids=solana,ethereum,...` request. Cuts boot
+  CoinGecko calls 6→1.
+- **Turso `tcp_refused` retry** (`f4ecdb5`) — transient Railway→Turso TCP errors in the
+  auto-sell loop now retry up to 3× with 1s backoff instead of crashing the cycle.
+- **Turso 502/503 retry on reads** (`5d384f3`) — gateway-level errors on DB reads retry
+  similarly; prevents monitor data loss on Turso cold-starts.
+- **TON deposit monitor balance polls** (`6f3c2ec`) — Toncenter API calls now include the
+  `api_key` header; unauthenticated calls were being rate-limited and dropping deposits.
+- **Wallet-tracker dedup crash** (`2105850`) — the dedup query used a Postgres JSON-path
+  filter (`@>`) which doesn't exist in SQLite/libsql; switched to an application-level
+  filter.
+- **UNKNOWN token symbols in notifications and admin top-tokens** (`38ac4e3`,`a189ead`) —
+  a background backfill now resolves and persists symbols for trades recorded with
+  `UNKNOWN`; admin stats endpoint makes this non-blocking so it doesn't delay the response.
+- **Auto-sell eligible-users lookup throttled** (`4125a9d`) — the 5s auto-sell loop was
+  hitting the DB to fetch premium-eligible users every cycle; results now cached in Redis
+  with a 60s TTL, reducing DB read load ~6×.
+
+---
+
+## v0.8.0 — Reliability, Jito & Referral Payouts
+*2026-06-19 → 06-25*
+
+### Added
+- **Parallel-quote Solana routing** (`c337948`) — buy requests race Jupiter and
+  PumpPortal quotes in parallel (`Promise.allSettled`); the first winning quote is sent.
+  Graduated pump tokens remain Jupiter-first; bonding-curve tokens remain PumpDirect-first
+  with the parallel quotes already warm when direct fails. Eliminates the triple-send bug
+  on the bonding-curve fallback path.
+- **Jito auto-enable** (`4384289`) — Jito MEV protection is now always attempted at
+  startup via a reachability probe; `JITO_ENABLED` env flag removed (was error-prone).
+  Gracefully falls back to standard RPC when Jito is unreachable.
+- **Referral program** (`a383041`, `71569d3`, `78c047a`, `7b4daaf`) — `$2` payout on
+  first subscription via referral link; automated SOL payout from fee wallet (phase 1);
+  automated EVM payout across Base/BSC/Mantle (phase 2). Admin-gated, idempotent, capped.
+  Payout tx hashes recorded as an audit trail. *Note: subsequently removed — payouts
+  replaced by fee revenue model.*
+- **`/bot self-diagnose` tool** (`410b441`) — Claude can call `self_diagnose()` to report
+  which external services (Birdeye, Jupiter, DexScreener, Turso, etc.) are reachable. Used
+  to explain failures to users in plain language rather than surfacing raw errors.
+- **Native price Redis lifeboat** (`7b5a275`) — before every provider call, the last known
+  price is written to Redis. On a 429 cascade, the lifeboat value is served so auto-sell
+  keeps running on stale-but-present data instead of halting.
+
+### Fixed
+- **Jito block-engine host** (`30af01a`) — the hostname `jito.labs.io` has no DNS record;
+  the actual endpoint is `jito.wtf`. The "Railway DNS block" was a dead hostname.
+- **Graduated pump.fun token double-send** (`f210fe1`) — PumpPortal and Jupiter were
+  launched in parallel for graduated tokens, each placing a real on-chain transaction.
+  Now sequential with no fallback on timeout (double-buy guard). Regression test added.
+- **Heap leak / OOM** (`d4e0ab8`) — `memCache` (in-process price cache) was never pruned;
+  long-running containers accumulated stale entries until OOM. Now swept on every cache set
+  (evict entries older than TTL).
+- **`@solana/spl-token` upgrade** (`031396e`) — bumped from 0.1.8 → 0.4.14; fixes
+  withdrawal failures on SPL token accounts created with the newer ATA program.
+- **Stale signed tx on confirmation timeout** (`b53961f`) — when `confirmTransaction`
+  timed out, the retry path was re-signing the *same* already-submitted transaction,
+  risking a duplicate on-chain. Now: timeout → return the existing tx hash; only build a
+  fresh tx on a fresh retry.
+- **Withdrawal anomaly detection** (`99eba61`) — `redis.zRangeByScore` doesn't exist in
+  the Upstash SDK (it's `zrangebyscore`, lowercase); anomaly alerts were silently failing.
+  Also fixed BSC balance provider (wrong RPC was selected).
+- **All-chain missing-wallet backfill restored** (`71d941d`) — dormant users who deposited
+  on one chain before other chains were added had missing wallet rows; the backfill was
+  accidentally removed in v0.6.5. Re-added as a boot-time pass (idempotent, non-blocking).
+- **npm moderate vulnerability** (`4e6a4f1`) — `npm audit fix` applied for one resolvable
+  moderate advisory without touching money-critical libs.
+
+### Changed
+- Admin `total charged per user` now sums pay-per-use alpha charges + premium price with
+  individual breakdown fields, instead of showing one opaque total.
+
+---
+
 ## v0.7.1 — Stability & Onboarding Bug-Bash
 *2026-06-17 → 06-18*
 
